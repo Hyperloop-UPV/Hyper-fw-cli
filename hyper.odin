@@ -14,8 +14,8 @@ import "core:terminal"
 import "core:terminal/ansi"
 import "core:text/regex"
 
-import platform "tools/hyper-platform"
-import cmdline "tools/hyper-cmdline"
+import platform "hyper-platform"
+import cmdline "hyper-cmdline"
 
 REPO_ROOT: string
 TOOLS_DIR: string
