@@ -148,7 +148,7 @@ print_usage :: proc()
 {
   fmt.printfln("Usage: %s <command> [options]", os.args[0])
   fmt.println(`Commands can be any of ["init", "help", "examples", "run", "build", "flash", "uart", "doctor", "hardfault-analysis", "stlib-build", "stlib-sim-tests"]`)
-  fmt.printfln("Use '%s help <command> to get usage of a specific command'", os.args[0])
+  fmt.printfln("Use '%s help <command>' to get usage of a specific command", os.args[0])
 }
 
 handle_help_command :: proc(help: Hyper_HelpCommand)
