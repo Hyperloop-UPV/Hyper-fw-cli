@@ -1546,7 +1546,7 @@ open_uart :: proc(port: string, baud: int, tool: cmdline.Hyper_UartTool) -> bool
     fmt.eprintfln("Could not resolve uart port %s", port)
     return false
   }
-  if resolved_tool == .auto {
+  if resolved_tool == .auto || resolved_tool == .none {
     fmt.eprintfln("Could not resolve uart tool %v", tool)
     return false
   }
