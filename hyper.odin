@@ -374,18 +374,26 @@ clt_root_candidates :: proc(version: string = "") -> [dynamic]string
     }
 
     when ODIN_OS == .Darwin || ODIN_OS == .Linux {
-      base_dirs := []string{"/opt/ST", os.user_home_dir(), "ST"}
+      home_dir, _ := os.user_home_dir(context.temp_allocator)
+      base_dirs := []string{"/opt/ST", home_dir, "ST"}
       for base_dir in base_dirs {
         if !os.is_dir(base_dir) {
           continue
         }
         if ver != "" {
           for suffix in suffixes {
-            append(&candidates, os.glob(base_dir, context.allocator))
+            path, _ := os.join_path({base_dir, suffix}, context.temp_allocator)
+            paths, _ := os.glob(path, context.allocator)
+            append(&candidates, ..paths[:])
           }
         } else {
-          append(&candidates, os.glob(os.join_path(base_dir, "STM32CubeCLT_*", context.temp_allocator), context.allocator))
-          append(&candidates, os.glob(os.join_path(base_dir, "STM32CubeCLT-*", context.allocator), context.allocator))
+          path, _ := os.join_path({base_dir, "STM32CubeCLT_*"}, context.temp_allocator)
+          paths, _ := os.glob(path, context.allocator)
+          append(&candidates, ..paths[:])
+
+          path, _ = os.join_path({base_dir, "STM32CubeCLT-*"}, context.temp_allocator)
+          paths, _ = os.glob(path, context.allocator)
+          append(&candidates, ..paths[:])
         }
       }
     } else {
@@ -1210,7 +1218,7 @@ virtual_python_path :: proc(virt_dir: string, allocator := context.temp_allocato
     fmt.eprintfln("Could not find virtual python path in {%s, %s, Scripts|bin, python.exe}", REPO_ROOT, virt_dir)
     return ""
   } else {
-    path, _ = os.join_path({REPO_ROOT, virt_dir, "bin", "python.exe"}, allocator)
+    path, _ := os.join_path({REPO_ROOT, virt_dir, "bin", "python.exe"}, allocator)
     return path
   }
 }
