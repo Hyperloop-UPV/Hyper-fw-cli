@@ -1,11 +1,13 @@
 #+vet style
 #+vet unused
+#+vet unused-variables
+#+vet unused-imports
 #+vet shadowing
 package hyper
 
-import "base:runtime"
 import "core:os"
 import "core:fmt"
+import "core:mem"
 import "core:time"
 import "core:slice"
 import "core:strings"
@@ -67,6 +69,7 @@ Hyper © 2026 by HyperloopUPV Firmware subsystem under CC By 4.0
 
 Build • Flash • UART • Diagnostics • ST-LIB
 `
+HELP_BANNER_BUILDER: strings.Builder
 HELP_BANNER: string
 HELP_BANNER_WIDTH :: 82
 HELP_EXAMPLES :: `Examples:
@@ -197,15 +200,14 @@ setup_globals :: proc()
   getenv(&DEFAULT_UV_VERSION, "HYPER_UV_VERSION")
   COLOR_ENABLED = terminal.color_depth != .None
 
-  help: strings.Builder
-  strings.write_string(&help, "╔")
+  strings.write_string(&HELP_BANNER_BUILDER, "╔")
   for i := 0; i < HELP_BANNER_WIDTH; i += 1 {
-    strings.write_string(&help, "═")
+    strings.write_string(&HELP_BANNER_BUILDER, "═")
   }
-  strings.write_string(&help, "╗\n")
+  strings.write_string(&HELP_BANNER_BUILDER, "╗\n")
 
   buf: [HELP_BANNER_WIDTH]u8
-  runtime.memset(&buf[0], ' ', HELP_BANNER_WIDTH)
+  mem.set(&buf[0], ' ', HELP_BANNER_WIDTH)
   for line in strings.split_lines_iterator(&HELP_BANNER_ROWS) {
     rem := HELP_BANNER_WIDTH - strings.rune_count(line)
     left := rem / 2
@@ -214,19 +216,19 @@ setup_globals :: proc()
       right += 1
     }
 
-    strings.write_string(&help, "║")
-    strings.write_bytes(&help, buf[:left])    
-    strings.write_string(&help, line)
-    strings.write_bytes(&help, buf[:right])
-    strings.write_string(&help, "║\n")
+    strings.write_string(&HELP_BANNER_BUILDER, "║")
+    strings.write_bytes(&HELP_BANNER_BUILDER, buf[:left])    
+    strings.write_string(&HELP_BANNER_BUILDER, line)
+    strings.write_bytes(&HELP_BANNER_BUILDER, buf[:right])
+    strings.write_string(&HELP_BANNER_BUILDER, "║\n")
   }
-  strings.write_string(&help, "╚")
+  strings.write_string(&HELP_BANNER_BUILDER, "╚")
   for i := 0; i < HELP_BANNER_WIDTH; i += 1 {
-    strings.write_string(&help, "═")
+    strings.write_string(&HELP_BANNER_BUILDER, "═")
   }
-  strings.write_string(&help, "╝")
+  strings.write_string(&HELP_BANNER_BUILDER, "╝")
 
-  HELP_BANNER = strings.to_string(help)
+  HELP_BANNER = strings.to_string(HELP_BANNER_BUILDER)
 
   if command_path("curl", context.temp_allocator) != "" {
     AVAILABLE_DOWNLOADER = .curl
@@ -248,6 +250,21 @@ setup_globals :: proc()
     AVAILABLE_UNZIPPER = { .none }
     print_note("No available program to unzip files, you might need to install unzip or tar", .Warn)
   }
+}
+
+free_all_globals :: proc()
+{
+  delete(TOOLS_DIR)
+  delete(STLIB_ROOT)
+  delete(BUILD_EXAMPLE_SCRIPT)
+  delete(PREFLASH_CHECK_SCRIPT)
+  delete(INIT_SCRIPT)
+  delete(STLIB_BUILD_SCRIPT)
+  delete(STLIB_SIM_TESTS_SCRIPT)
+  delete(HARD_FAULT_ANALYSIS_SCRIPT)
+  delete(LATEST_ELF)
+  delete(REPO_ROOT)
+  strings.builder_destroy(&HELP_BANNER_BUILDER)
 }
 
 ToolStatus :: struct {
@@ -588,7 +605,7 @@ print_action :: proc(title: string, details: [][2]string)
 {
   buf: [64]u8
   dashcount := min(len(title), len(buf))
-  runtime.memset(&buf[0], '-', dashcount)
+  mem.set(&buf[0], '-', dashcount)
   if !COLOR_ENABLED {
     fmt.printfln("\n%s\n%.*s", title, dashcount, &buf[0])
   } else {
@@ -1652,7 +1669,7 @@ command_doctor :: proc() -> bool
   overall_status := "ok" if len(issues) == 0 else "wrong"
 
   buf: [32]u8
-  runtime.memset(&buf[0], '=', 32)
+  mem.set(&buf[0], '=', 32)
   if !COLOR_ENABLED {
     fmt.printfln("Hyper Doctor %v", overall_status)
     fmt.printfln("%s", string(buf[:]))
@@ -1782,7 +1799,7 @@ command_examples :: proc(examples: ^cmdline.Hyper_ExamplesCommand) -> bool
 command_run :: proc(run: ^cmdline.Hyper_RunCommand) -> bool
 {
   buf: [16]u8
-  runtime.memset(&buf[0], '=', 16)
+  mem.set(&buf[0], '=', 16)
   fmt.println(ansi.CSI + ansi.BOLD + ansi.SGR + "Hyper Run" + ansi.CSI + ansi.RESET + ansi.SGR)
   fmt.printfln(ansi.CSI + ansi.FAINT + ansi.SGR + "%.*s", ansi.CSI + ansi.RESET + ansi.SGR, 16, &buf[0])
   inject_at(&run.overflow, 0, run.extra_cxx_flags)
@@ -1877,8 +1894,25 @@ command_stlib_sim_tests :: proc() -> bool
 
 main :: proc()
 {
+  when ODIN_DEBUG {
+		track: mem.Tracking_Allocator
+		mem.tracking_allocator_init(&track, context.allocator)
+		context.allocator = mem.tracking_allocator(&track)
+
+		defer {
+			if len(track.allocation_map) > 0 {
+				fmt.eprintf("=== %v allocations not freed: ===\n", len(track.allocation_map))
+				for _, entry in track.allocation_map {
+					fmt.eprintf("- %v bytes @ %v\n", entry.size, entry.location)
+				}
+			}
+			mem.tracking_allocator_destroy(&track)
+		}
+	}
+
   platform.init()
   setup_globals()
+  defer free_all_globals()
 
   platform.write_console_unicode(HELP_BANNER)
   fmt.println()
