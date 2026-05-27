@@ -22,13 +22,15 @@ Hyper_Command :: enum {
 }
 
 Hyper_FlashMethod :: enum {
-  auto = 0,
+  none = 0,
+  auto,
   stm32prog,
   openocd,
 }
 
 Hyper_UartTool :: enum {
-  auto = 0,
+  none = 0,
+  auto,
   tio,
   cu,
 }

@@ -12,6 +12,7 @@ import "core:time"
 import "core:slice"
 import "core:strings"
 import "core:strconv"
+import "core:reflect"
 import "core:terminal"
 import "core:terminal/ansi"
 import "core:text/regex"
@@ -31,8 +32,8 @@ HARD_FAULT_ANALYSIS_SCRIPT: string
 LATEST_ELF: string
 
 DEFAULT_PRESET: string
-DEFAULT_FLASH_METHOD: string
-DEFAULT_UART_TOOL: string
+DEFAULT_FLASH_METHOD: cmdline.Hyper_FlashMethod
+DEFAULT_UART_TOOL: cmdline.Hyper_UartTool
 DEFAULT_UART_PORT: string
 DEFAULT_UART_BAUD: int
 DEFAULT_REQUIRED_CLT_VERSION: string
@@ -163,6 +164,7 @@ setup_globals :: proc()
     fmt.assertf(os_err == nil, "Could not join %v path: %v", paths, os_err)
   }
 
+  ok: bool
   os_err: os.Error
   REPO_ROOT, os_err = os.get_working_directory(context.allocator)
   fmt.assertf(os_err == nil, "Could not get executable directory: %v", os_err)
@@ -178,12 +180,27 @@ setup_globals :: proc()
   setup_path(&LATEST_ELF, {REPO_ROOT, "out", "build", "latest.elf"})
 
   getenv(&DEFAULT_PRESET, "HYPER_DEFAULT_PRESET", "nucleo-debug")
-  getenv(&DEFAULT_FLASH_METHOD, "HYPER_FLASH_METHOD", "auto")
-  getenv(&DEFAULT_UART_TOOL, "HYPER_UART_TOOL", "auto")
+  flash_method_str: string
+  getenv(&flash_method_str, "HYPER_FLASH_METHOD", "auto")
+  DEFAULT_FLASH_METHOD, ok = reflect.enum_from_name(cmdline.Hyper_FlashMethod, flash_method_str)
+  if !ok {
+    fmt.eprintfln("Invalid Flash method for HYPER_FLASH_METHOD env.\n" + 
+                  "Possible values are: %v", reflect.enum_field_names(cmdline.Hyper_FlashMethod))
+    os.exit(2)
+  }
+
+  uart_tool_str: string
+  getenv(&uart_tool_str, "HYPER_UART_TOOL", "auto")
+  DEFAULT_UART_TOOL, ok = reflect.enum_from_name(cmdline.Hyper_UartTool, uart_tool_str)
+  if !ok {
+    fmt.eprintfln("Invalid Uart tool for HYPER_UART_TOOL env.\n" +
+                  "Possible values are: %v", reflect.enum_field_names(cmdline.Hyper_UartTool))
+    os.exit(2)
+  }
+
   getenv(&DEFAULT_UART_PORT, "HYPER_UART_PORT")
 
   {
-    ok: bool
     baud: string
     getenv(&baud, "HYPER_UART_BAUD", "115200")
     DEFAULT_UART_BAUD, ok = strconv.parse_int(baud)
@@ -1264,6 +1281,7 @@ ensure_file :: proc(path, label: string) -> bool
 
 run_build_example :: proc(example, test: string, no_test: bool, preset, board_name: string, extra_cxx_flags: []string, jobs: int) -> bool
 {
+  preset := preset
   if !ensure_file(BUILD_EXAMPLE_SCRIPT, "build-example helper") {
     return false
   }
@@ -1281,7 +1299,8 @@ run_build_example :: proc(example, test: string, no_test: bool, preset, board_na
   cmd := make([dynamic]string, context.temp_allocator)
   append(&cmd, BUILD_EXAMPLE_SCRIPT)
   if example != "" { append(&cmd, "--example", example) }
-  if preset != "" { append(&cmd, "--preset", preset) }
+  if preset == "" { preset = DEFAULT_PRESET }
+  append(&cmd, "--preset", preset)
   if no_test { append(&cmd, "--no-test") }
   else if test != "" { append(&cmd, "--test", test) }
 
@@ -1347,8 +1366,10 @@ flash_elf :: proc(elf: string, method: cmdline.Hyper_FlashMethod, verify, skip_p
   elf := elf
   if elf == "" { elf = LATEST_ELF }
   ensure_file(elf, "Elf image")
-  resolved_method := resolve_flash_method(method)
-  if resolved_method == .auto {
+  resolved_method := method
+  if method == .none { resolved_method = DEFAULT_FLASH_METHOD }
+  resolved_method = resolve_flash_method(resolved_method)
+  if resolved_method == .auto || resolved_method == .none {
     fmt.eprintfln("Could not resolve flash method")
     return false
   }
@@ -1512,8 +1533,15 @@ resolve_uart_tool :: proc(req: cmdline.Hyper_UartTool) -> cmdline.Hyper_UartTool
 
 open_uart :: proc(port: string, baud: int, tool: cmdline.Hyper_UartTool) -> bool
 {
-  resolved_port := choose_serial_port(port)
-  resolved_tool := resolve_uart_tool(tool)
+  baud := baud
+  resolved_port := port
+  if port == "" { resolved_port = DEFAULT_UART_PORT }
+  resolved_port = choose_serial_port(resolved_port)
+
+  resolved_tool := tool
+  if tool == .none { resolved_tool = DEFAULT_UART_TOOL }
+  resolved_tool = resolve_uart_tool(resolved_tool)
+
   if resolved_port == "" {
     fmt.eprintfln("Could not resolve uart port %s", port)
     return false
@@ -1523,6 +1551,7 @@ open_uart :: proc(port: string, baud: int, tool: cmdline.Hyper_UartTool) -> bool
     return false
   }
 
+  if baud == 0 { baud = DEFAULT_UART_BAUD }
   print_action("UART", {
     {"tool", fmt.tprint(resolved_tool)},
     {"port", resolved_port},
@@ -1681,7 +1710,7 @@ command_doctor :: proc() -> bool
   section_title("Environment")
   print_detail("repo", REPO_ROOT)
   print_detail("default preset", DEFAULT_PRESET)
-  print_detail("default flash", DEFAULT_FLASH_METHOD)
+  print_detail("default flash", fmt.tprint(DEFAULT_FLASH_METHOD))
   print_detail("default baud", fmt.tprint(DEFAULT_UART_BAUD))
   print_detail("latest elf", "present" if os.exists(LATEST_ELF) else "missing")
 
@@ -1822,7 +1851,6 @@ command_run :: proc(run: ^cmdline.Hyper_RunCommand) -> bool
     return false
   }
   if run.uart {
-    if run.baud == 0 { run.baud = DEFAULT_UART_BAUD }
     if !open_uart(run.port, run.baud, run.uart_tool) {
       fmt.eprintfln("Failed to open uart port")
       return false
@@ -1960,7 +1988,6 @@ main :: proc()
     }
 
     case .uart: {
-      if opts.uart.baud == 0 { opts.uart.baud = DEFAULT_UART_BAUD }
       open_uart(opts.uart.port, opts.uart.baud, opts.uart.uart_tool)
     }
 
