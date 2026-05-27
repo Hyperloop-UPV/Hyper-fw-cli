@@ -17,6 +17,8 @@ Prebuilt binaries _soon_ ™
 
 Install odinlang if you don't have it: https://odin-lang.org/docs/install/
 
+Alternatively, get the latest release with `get-odin-latest.py`
+
 windows/linux/macos: **From this directory**, run
 ```
 odin build . -out:hyper[.exe] -o:speed
