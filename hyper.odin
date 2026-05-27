@@ -939,17 +939,17 @@ prepare_clt_installers :: proc(installer: string) -> (installers: [dynamic]strin
       return
     }
 
-    cleanup_dir, _ := os.make_directory_temp(".", "hyper-clt-macos-", context.temp_allocator)
+    cleanup_dir, _ = os.make_directory_temp(".", "hyper-clt-macos-", context.temp_allocator)
     if ext_lower == ".zip" {
-      if !extract_all_from_zip(installer, tmpdir) {
+      if !extract_all_from_zip(installer, cleanup_dir) {
         fmt.eprintfln("Could not unzip %s. Terminating program...", installer)
         return
       }
 
-      pkg_paths, _ := os.join_path({tmpdir, "*.pkg"}, context.temp_allocator)
+      pkg_paths, _ := os.join_path({cleanup_dir, "*.pkg"}, context.temp_allocator)
       pkgs, _ := os.glob(pkg_paths, context.temp_allocator)
       if len(pkgs) == 0 {
-        pkg_paths, _ := os.join_path({tmpdir, "*"}, context.temp_allocator)
+        pkg_paths, _ = os.join_path({cleanup_dir, "*"}, context.temp_allocator)
         nested_archives := make([dynamic]string, context.temp_allocator)
         targz_paths, _ := os.glob(fmt.tprintf("%s.tar.gz", pkg_paths), context.temp_allocator)
         tgz_paths, _ := os.glob(fmt.tprintf("%s.tar.gz", pkg_paths), context.temp_allocator)
@@ -964,13 +964,13 @@ prepare_clt_installers :: proc(installer: string) -> (installers: [dynamic]strin
         slice.sort_by(nested_archives[:], file_less_than_cubeclt)
 
         for archive in nested_archives {
-          if !extract_all_from_tar(archive, tmpdir) {
-            fmt.eprintfln("Could not extract %s to %s", archive, tmpdir)
+          if !extract_all_from_tar(archive, cleanup_dir) {
+            fmt.eprintfln("Could not extract %s to %s", archive, cleanup_dir)
             return
           }
         }
 
-        pkgs, _ := os.glob(pkg_paths, context.temp_allocator)
+        pkgs, _ = os.glob(pkg_paths, context.temp_allocator)
       }
 
       if len(pkgs) == 0 {
@@ -1784,7 +1784,7 @@ command_examples :: proc(examples: ^cmdline.Hyper_ExamplesCommand) -> bool
     run_command({BUILD_EXAMPLE_SCRIPT, "--list"})
   } else if examples.subcommand == .tests {
     if examples.example == "" {
-      fmt.printfln("Missing example flag, required when using %s examples tests", os.args[0])
+      fmt.printfln("Missing example flag, required if using %s examples tests", os.args[0])
       return false
     }
     print_action("Examples", {
@@ -1894,7 +1894,7 @@ command_stlib_sim_tests :: proc() -> bool
 
 main :: proc()
 {
-  when ODIN_DEBUG {
+  if ODIN_DEBUG {
 		track: mem.Tracking_Allocator
 		mem.tracking_allocator_init(&track, context.allocator)
 		context.allocator = mem.tracking_allocator(&track)
