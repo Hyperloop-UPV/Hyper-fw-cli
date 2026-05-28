@@ -1626,6 +1626,9 @@ init_repo :: proc() -> bool
   // init-submodules.sh
   // NOTE: sleep is necessary at least on windows
   time.sleep(time.Millisecond * 100)
+  /*
+    git submodule update --init --depth=1
+  */
   state = run_command({"git", "submodule", "update", "--init", "--depth=1"}, cwd = STLIB_ROOT)
   if state.exit_code != 0 {
     fmt.eprintfln("Could not init submodules for ST-LIB")
@@ -1635,6 +1638,9 @@ init_repo :: proc() -> bool
   // NOTE: sleep is necessary at least on windows
   time.sleep(time.Millisecond * 100)
   stm_root, _ := os.join_path({STLIB_ROOT, "STM32CubeH7"}, context.temp_allocator)
+  /*
+    git submodule update --init --depth=1 Drivers/STM32H7xx_HAL_Driver Drivers/CMSIS/Device/ST/STM32H7xx Drivers/BSP/Components/lan8742
+  */
   state = run_command({"git", "submodule", "update", "--init", "--depth=1",
     "Drivers/STM32H7xx_HAL_Driver",
     "Drivers/CMSIS/Device/ST/STM32H7xx",
