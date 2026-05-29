@@ -207,22 +207,40 @@ class OdinInstaller:
         if not self.download_with_progress(asset_url, temp_file):
             sys.exit(1)
         
-        # Extract
-        print(f"[INFO] Extracting to {self.odin_dir}")
-        try:
-            if asset_name.endswith('.zip'):
-                with zipfile.ZipFile(temp_file, 'r') as zip_ref:
-                    zip_ref.extractall(self.odin_dir)
-            elif asset_name.endswith('.tar.gz'):
-                with tarfile.open(temp_file, 'r:gz') as tar_ref:
-                    tar_ref.extractall(self.odin_dir)
-            else:
-                print(f"[ERROR] Unknown archive format: {asset_name}")
+        # Extract to a temporary location first
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            print(f"[INFO] Extracting to temporary location")
+            try:
+                if asset_name.endswith('.zip'):
+                    with zipfile.ZipFile(temp_file, 'r') as zip_ref:
+                        zip_ref.extractall(tmp_path)
+                elif asset_name.endswith('.tar.gz'):
+                    with tarfile.open(temp_file, 'r:gz') as tar_ref:
+                        tar_ref.extractall(tmp_path)
+                else:
+                    print(f"[ERROR] Unknown archive format: {asset_name}")
+                    sys.exit(1)
+            except Exception as e:
+                print(f"[ERROR] Extraction failed: {e}")
                 sys.exit(1)
-        except Exception as e:
-            print(f"[ERROR] Extraction failed: {e}")
-            sys.exit(1)
-        
+
+            # Flatten if the archive contains a single top-level directory
+            contents = list(tmp_path.iterdir())
+            if len(contents) == 1 and contents[0].is_dir():
+                # Single folder – move its contents into odin_dir
+                source_dir = contents[0]
+                print(f"[INFO] Flattening: moving contents of '{source_dir.name}' directly into {self.odin_dir}")
+                for item in source_dir.iterdir():
+                    shutil.move(str(item), self.odin_dir / item.name)
+                # source_dir will be removed when tmpdir is cleaned up
+            else:
+                # Archive has multiple items at root – move them directly
+                print(f"[INFO] Moving extracted files directly into {self.odin_dir}")
+                for item in contents:
+                    shutil.move(str(item), self.odin_dir / item.name)
+
         temp_file.unlink()
         
         # Make executable on Unix
