@@ -56,7 +56,7 @@ Hyper_ExamplesCommand :: struct {
 }
 
 Hyper_BuildCommand :: struct {
-  example: string `usage:"Example to build, e.g. adc"`,
+  example: string `args:"pos=0" usage:"Example to build, e.g. adc"`,
   test: string `usage:"Test selector, e.g. 0, 1 or TEST_1"`,
   no_test: bool `usage:"Do not inject any TEST_* macro"`,
   preset: string `usage:"ST-LIB preset to build"`,
@@ -75,7 +75,7 @@ Hyper_FlashCommand :: struct {
 
 Hyper_RunCommand :: struct {
   // build
-  example: string `usage:"Example to build, e.g. adc"`,
+  example: string `args:"pos=0" usage:"Example to build, e.g. adc"`,
   test: string `usage:"Test selector, e.g. 0, 1 or TEST_1"`,
   no_test: bool `usage:"Do not inject any TEST_* macro"`,
   preset: string `usage:"ST-LIB preset to build"`,

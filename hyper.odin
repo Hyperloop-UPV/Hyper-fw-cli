@@ -16,6 +16,7 @@ import "core:reflect"
 import "core:terminal"
 import "core:terminal/ansi"
 import "core:text/regex"
+import utf8 "core:unicode/utf8"
 
 import platform "hyper-platform"
 import cmdline "hyper-cmdline"
@@ -48,28 +49,32 @@ CLT_PRODUCT_PAGE :: "https://www.st.com/en/development-tools/stm32cubeclt.html"
 CLT_RELEASE_NOTE :: "https://www.st.com/resource/en/release_note/rn0132-stm32cube-commandline-toolset-release-v1210-stmicroelectronics.pdf"
 UV_INSTALL_PAGE :: "https://docs.astral.sh/uv/getting-started/installation/"
 
-HELP_BANNER_ROWS := `
-██╗  ██╗██╗   ██╗██████╗ ███████╗██████╗ ██╗      ██████╗  ██████╗ ██████╗ 
+HELP_BANNER_BLOCKS := []string {
+`
+██╗  ██╗██╗   ██╗██████╗ ███████╗██████╗ ██╗      ██████╗  ██████╗ ██████╗
 ██║  ██║╚██╗ ██╔╝██╔══██╗██╔════╝██╔══██╗██║     ██╔═══██╗██╔═══██╗██╔══██╗
 ███████║ ╚████╔╝ ██████╔╝█████╗  ██████╔╝██║     ██║   ██║██║   ██║██████╔╝
-██╔══██║  ╚██╔╝  ██╔═══╝ ██╔══╝  ██╔══██╗██║     ██║   ██║██║   ██║██╔═══╝ 
-██║  ██║   ██║   ██║     ███████╗██║  ██║███████╗╚██████╔╝╚██████╔╝██║     
-╚═╝  ╚═╝   ╚═╝   ╚═╝     ╚══════╝╚═╝  ╚═╝╚══════╝ ╚═════╝  ╚═════╝ ╚═╝     
-
-                                  ▅█╗      
-██╗   ██╗██████╗ ██╗   ██╗         ██║        
-██║   ██║██╔══██╗██║   ██║     ▅█╗ ██║       
-██║   ██║██████╔╝██║   ██║     ██████║   ▅▅▅╖ 
-██║   ██║██╔═══╝ ╚██╗ ██╔╝     ▀█╔═██║ ▅██▀═╝ 
-╚██████╔╝██║      ╚████╔╝       ╘╝ █▀▅██▀═╝  
- ╚═════╝ ╚═╝       ╚═══╝           ▅██▀═╝     
-                                   █▀═╝         
-                                   ╘╝           
-
-Hyper © 2026 by HyperloopUPV Firmware subsystem under CC By 4.0
-
-Build • Flash • UART • Diagnostics • ST-LIB
+██╔══██║  ╚██╔╝  ██╔═══╝ ██╔══╝  ██╔══██╗██║     ██║   ██║██║   ██║██╔═══╝
+██║  ██║   ██║   ██║     ███████╗██║  ██║███████╗╚██████╔╝╚██████╔╝██║
+╚═╝  ╚═╝   ╚═╝   ╚═╝     ╚══════╝╚═╝  ╚═╝╚══════╝ ╚═════╝  ╚═════╝ ╚═╝
+`,
+  "",
 `
+                                   ▅█╖
+██╗   ██╗██████╗ ██╗   ██╗         ██║
+██║   ██║██╔══██╗██║   ██║     ▅█╗ ██║
+██║   ██║██████╔╝██║   ██║     ██████║   ▅▅▅╖
+██║   ██║██╔═══╝ ╚██╗ ██╔╝     ▀█╔═██║ ▅██▀╔╝
+╚██████╔╝██║      ╚████╔╝       ╘╝ █▀▅██▀╔╝
+ ╚═════╝ ╚═╝       ╚═══╝           ▅██▀╔╝
+                                   █▀╔╝
+                                   ╘╝
+`,
+  "",
+  "Hyper © 2026 by HyperloopUPV Firmware subsystem under CC By 4.0",
+  "",
+  "Build • Flash • UART • Diagnostics • ST-LIB",
+}
 HELP_BANNER_BUILDER: strings.Builder
 HELP_BANNER: string
 HELP_BANNER_WIDTH :: 82
@@ -83,7 +88,7 @@ HELP_EXAMPLES :: `Examples:
 `
 SERIAL_PATTERNS : []string : {
   "/dev/serial/by-id/*",
-  "dev/cu.usbmodem*",
+  "/dev/cu.usbmodem*",
   "/dev/cu.usbserial*",
   "/dev/cu.wchusbserial*",
   "/dev/ttyACM*",
@@ -172,7 +177,7 @@ setup_globals :: proc()
   setup_path(&TOOLS_DIR, {REPO_ROOT, "tools"})
   setup_path(&STLIB_ROOT, {REPO_ROOT, "deps", "ST-LIB"})
   setup_path(&BUILD_EXAMPLE_SCRIPT, {TOOLS_DIR, "build-example.sh"})
-  setup_path(&PREFLASH_CHECK_SCRIPT, {TOOLS_DIR, "preflash-check.py"})
+  setup_path(&PREFLASH_CHECK_SCRIPT, {TOOLS_DIR, "preflash_check.py"})
   setup_path(&INIT_SCRIPT, {TOOLS_DIR, "init.sh"})
   setup_path(&STLIB_BUILD_SCRIPT, {STLIB_ROOT, "tools", "build.py"})
   setup_path(&STLIB_SIM_TESTS_SCRIPT, {STLIB_ROOT, "tools", "run_sim_tests.sh"})
@@ -225,19 +230,32 @@ setup_globals :: proc()
 
   buf: [HELP_BANNER_WIDTH]u8
   mem.set(&buf[0], ' ', HELP_BANNER_WIDTH)
-  for line in strings.split_lines_iterator(&HELP_BANNER_ROWS) {
-    rem := HELP_BANNER_WIDTH - strings.rune_count(line)
-    left := rem / 2
-    right := left
-    if left + right + strings.rune_count(line) < HELP_BANNER_WIDTH {
-      right += 1
+
+  for block in HELP_BANNER_BLOCKS {
+    max_width := 0
+    trimmed := strings.trim(block, "\n\r")
+    lines := strings.split_lines(trimmed, context.temp_allocator) or_continue
+    for line in lines {
+      _, _, w := utf8.grapheme_count(line)
+      if w > max_width { max_width = w }
     }
 
-    strings.write_string(&HELP_BANNER_BUILDER, "║")
-    strings.write_bytes(&HELP_BANNER_BUILDER, buf[:left])    
-    strings.write_string(&HELP_BANNER_BUILDER, line)
-    strings.write_bytes(&HELP_BANNER_BUILDER, buf[:right])
-    strings.write_string(&HELP_BANNER_BUILDER, "║\n")
+    rem := HELP_BANNER_WIDTH - max_width
+    left := rem / 2
+    base_right := left
+    if left + base_right + max_width < HELP_BANNER_WIDTH {
+      base_right += 1
+    }
+
+    for line in lines {
+      _, _, w := utf8.grapheme_count(line)
+      right := base_right + (max_width - w)
+      strings.write_string(&HELP_BANNER_BUILDER, "║")
+      strings.write_bytes(&HELP_BANNER_BUILDER, buf[:left])
+      strings.write_string(&HELP_BANNER_BUILDER, line)
+      strings.write_bytes(&HELP_BANNER_BUILDER, buf[:right])
+      strings.write_string(&HELP_BANNER_BUILDER, "║\n")
+    }
   }
   strings.write_string(&HELP_BANNER_BUILDER, "╚")
   for i := 0; i < HELP_BANNER_WIDTH; i += 1 {
@@ -340,8 +358,6 @@ read_command_first_line :: proc(cmd: []string, preferred_pattern: string = "", a
     fmt.eprintfln("Could not run process %v: %v", cmd, err)
     return strings.clone("", allocator)
   }
-  fmt.println(string(stdout))
-  fmt.println(string(stderr))
 
   cleaned_lines := make([dynamic]string, context.temp_allocator)
   streams := [2][]u8{stdout, stderr}
@@ -791,9 +807,10 @@ print_command_context :: proc(cmd: []string, cwd: string)
   }
 }
 
-exec_command :: proc(cmd: []string, cwd: string = REPO_ROOT, env: []string = nil, wait: bool = true) -> (os.Process, os.Process_State)
+exec_command :: proc(cmd: []string, cwd: string = REPO_ROOT, env: []string = nil, wait: bool = true, stdin: ^os.File = nil) -> (os.Process, os.Process_State)
 {
   print_command_context(cmd, cwd)
+  os.flush(os.stdout)
   environment := env
   if len(env) != 0 {
     new_env := make([dynamic]string, context.temp_allocator)
@@ -807,6 +824,9 @@ exec_command :: proc(cmd: []string, cwd: string = REPO_ROOT, env: []string = nil
     command = cmd,
     working_dir = cwd,
     env = environment,
+    stdin = stdin,
+    stdout = os.stdout,
+    stderr = os.stderr,
   }
   process, err := os.process_start(desc)
   if err != nil {
@@ -1252,7 +1272,7 @@ virtual_python_path :: proc(virt_dir: string, allocator := context.temp_allocato
     fmt.eprintfln("Could not find virtual python path in {%s, %s, Scripts|bin, python.exe}", REPO_ROOT, virt_dir)
     return ""
   } else {
-    path, _ := os.join_path({REPO_ROOT, virt_dir, "bin", "python.exe"}, allocator)
+    path, _ := os.join_path({REPO_ROOT, virt_dir, "bin", "python"}, allocator)
     return path
   }
 }
@@ -1265,8 +1285,13 @@ setup_python_env_with_uv :: proc(uv_path: string)
     {"tool", "uv"},
     {"venv", venv_path},
   })
-  run_command({uv_path, "venv", venv_path})
-  run_command({uv_path, "pip", "install", "--python", virtual_python_path("virtual"), "-r", requirements_path})
+  python_path := virtual_python_path("virtual")
+  if os.exists(python_path) {
+    print_note("virtual environment already exists, skipping creation", .Info)
+  } else {
+    run_command({uv_path, "venv", venv_path})
+  }
+  run_command({uv_path, "pip", "install", "--python", python_path, "-r", requirements_path})
   print_note("python environment ready", .Ok)
 }
 
@@ -1305,12 +1330,8 @@ run_build_example :: proc(example, test: string, no_test: bool, preset, board_na
   else if test != "" { append(&cmd, "--test", test) }
 
   if board_name != "" { append(&cmd, "--board-name", board_name) }
-  if len(extra_cxx_flags) != 0 {
-    // TODO: This should probably take the whole array of cxx flags right?
-    if len(extra_cxx_flags) > 1 {
-      print_note("More than one extra cxx flag is not supported currently", .Warn)
-    }
-    append(&cmd, "--extra-cxx-flags", extra_cxx_flags[0])
+  for flag in extra_cxx_flags {
+    append(&cmd, "--extra-cxx-flags", flag)
   }
 
   status := run_command(cmd[:])
@@ -1365,7 +1386,7 @@ flash_elf :: proc(elf: string, method: cmdline.Hyper_FlashMethod, verify, skip_p
 {
   elf := elf
   if elf == "" { elf = LATEST_ELF }
-  ensure_file(elf, "Elf image")
+  if !ensure_file(elf, "Elf image") { return false }
   resolved_method := method
   if method == .none { resolved_method = DEFAULT_FLASH_METHOD }
   resolved_method = resolve_flash_method(resolved_method)
@@ -1375,7 +1396,7 @@ flash_elf :: proc(elf: string, method: cmdline.Hyper_FlashMethod, verify, skip_p
   }
   print_action("Flash", {
     {"elf", elf},
-    {"method", fmt.tprint(method)},
+    {"method", fmt.tprint(resolved_method)},
     {"verify", "yes" if verify else "no"},
   })
   if !run_preflash_check(skip_preflight) { return false }
@@ -1566,9 +1587,9 @@ open_uart :: proc(port: string, baud: int, tool: cmdline.Hyper_UartTool) -> bool
 
   // TODO: Inspect process info?
   if resolved_tool == .tio {
-    exec_command({"tio", "--baudrate", fmt.tprint(baud), resolved_port}, wait = true)
+    exec_command({"tio", "--baudrate", fmt.tprint(baud), resolved_port}, wait = true, stdin = os.stdin)
   } else if resolved_tool == .cu {
-    exec_command({"cu", "-l", resolved_port, "-s", fmt.tprint(baud)}, wait = true)
+    exec_command({"cu", "-l", resolved_port, "-s", fmt.tprint(baud)}, wait = true, stdin = os.stdin)
   } else {
     fmt.eprintfln("Unsupported UART tool %v", resolved_tool)
     return false
@@ -1624,8 +1645,11 @@ init_repo :: proc() -> bool
   }
 
   // init-submodules.sh
-  // NOTE: sleep is necessary at least on windows
-  time.sleep(time.Millisecond * 100)
+  when ODIN_OS == .Windows {
+    // Give the filesystem a moment after previous git operations
+    time.sleep(time.Millisecond * 100)
+  }
+  print_note("Initializing ST-LIB submodules (git submodule update)...", .Info)
   /*
     git submodule update --init --depth=1
   */
@@ -1635,9 +1659,12 @@ init_repo :: proc() -> bool
     return false
   }
 
-  // NOTE: sleep is necessary at least on windows
-  time.sleep(time.Millisecond * 100)
+  when ODIN_OS == .Windows {
+    // Give the filesystem a moment after previous git operations
+    time.sleep(time.Millisecond * 100)
+  }
   stm_root, _ := os.join_path({STLIB_ROOT, "STM32CubeH7"}, context.temp_allocator)
+  print_note("Initializing STM32CubeH7 submodules...", .Info)
   /*
     git submodule update --init --depth=1 Drivers/STM32H7xx_HAL_Driver Drivers/CMSIS/Device/ST/STM32H7xx Drivers/BSP/Components/lan8742
   */
@@ -1652,7 +1679,7 @@ init_repo :: proc() -> bool
   }
 
   print_note("Init complete", .Ok)
-  return false
+  return true
 }
 
 command_doctor :: proc() -> bool
@@ -1697,7 +1724,7 @@ command_doctor :: proc() -> bool
   } else if clt_version != DEFAULT_REQUIRED_CLT_VERSION {
     append(&issues, fmt.tprintf("STM32CubeCLT %s detected, expected %s", clt_version, DEFAULT_REQUIRED_CLT_VERSION))
   }
-  if uv_path != "" {
+  if uv_path == "" {
     append(&issues, "uv is not installed")
   }
 
@@ -1876,7 +1903,7 @@ command_hardfault_analysis :: proc() -> bool
     {"script", HARD_FAULT_ANALYSIS_SCRIPT},
     {"elf", LATEST_ELF},
   })
-  status := run_command({"python3", HARD_FAULT_ANALYSIS_SCRIPT}, cwd = REPO_ROOT)
+  _, status := exec_command({"python3", HARD_FAULT_ANALYSIS_SCRIPT}, cwd = REPO_ROOT, stdin = os.stdin)
   if status.exit_code == 0 {
     print_note("hard fault analysis completed", .Ok)
   } else {
