@@ -49,7 +49,7 @@ CLT_PRODUCT_PAGE :: "https://www.st.com/en/development-tools/stm32cubeclt.html"
 CLT_RELEASE_NOTE :: "https://www.st.com/resource/en/release_note/rn0132-stm32cube-commandline-toolset-release-v1210-stmicroelectronics.pdf"
 UV_INSTALL_PAGE :: "https://docs.astral.sh/uv/getting-started/installation/"
 
-HELP_BANNER_BLOCKS := []string {
+HELP_BANNER_BLOCKS := []string {"",
 `
 ██╗  ██╗██╗   ██╗██████╗ ███████╗██████╗ ██╗      ██████╗  ██████╗ ██████╗
 ██║  ██║╚██╗ ██╔╝██╔══██╗██╔════╝██╔══██╗██║     ██╔═══██╗██╔═══██╗██╔══██╗
@@ -78,14 +78,6 @@ HELP_BANNER_BLOCKS := []string {
 HELP_BANNER_BUILDER: strings.Builder
 HELP_BANNER: string
 HELP_BANNER_WIDTH :: 82
-HELP_EXAMPLES :: `Examples:
-  hyper doctor
-  hyper build adc --preset nucleo-debug --test 1
-  hyper build main --preset nucleo-debug
-  hyper hardfault-analysis
-  hyper run adc --preset nucleo-debug --test 1 --uart
-  hyper uart --list-ports
-`
 SERIAL_PATTERNS : []string : {
   "/dev/serial/by-id/*",
   "/dev/cu.usbmodem*",
@@ -807,7 +799,7 @@ print_command_context :: proc(cmd: []string, cwd: string)
   }
 }
 
-exec_command :: proc(cmd: []string, cwd: string = REPO_ROOT, env: []string = nil, wait: bool = true, stdin: ^os.File = nil) -> (os.Process, os.Process_State)
+exec_command :: proc(cmd: []string, cwd: string = REPO_ROOT, env: []string = nil, wait: bool = true) -> (os.Process, os.Process_State)
 {
   print_command_context(cmd, cwd)
   os.flush(os.stdout)
@@ -824,7 +816,7 @@ exec_command :: proc(cmd: []string, cwd: string = REPO_ROOT, env: []string = nil
     command = cmd,
     working_dir = cwd,
     env = environment,
-    stdin = stdin,
+    stdin = os.stdin,
     stdout = os.stdout,
     stderr = os.stderr,
   }
@@ -1587,9 +1579,9 @@ open_uart :: proc(port: string, baud: int, tool: cmdline.Hyper_UartTool) -> bool
 
   // TODO: Inspect process info?
   if resolved_tool == .tio {
-    exec_command({"tio", "--baudrate", fmt.tprint(baud), resolved_port}, wait = true, stdin = os.stdin)
+    exec_command({"tio", "--baudrate", fmt.tprint(baud), resolved_port}, wait = true)
   } else if resolved_tool == .cu {
-    exec_command({"cu", "-l", resolved_port, "-s", fmt.tprint(baud)}, wait = true, stdin = os.stdin)
+    exec_command({"cu", "-l", resolved_port, "-s", fmt.tprint(baud)}, wait = true)
   } else {
     fmt.eprintfln("Unsupported UART tool %v", resolved_tool)
     return false
@@ -1903,7 +1895,7 @@ command_hardfault_analysis :: proc() -> bool
     {"script", HARD_FAULT_ANALYSIS_SCRIPT},
     {"elf", LATEST_ELF},
   })
-  _, status := exec_command({"python3", HARD_FAULT_ANALYSIS_SCRIPT}, cwd = REPO_ROOT, stdin = os.stdin)
+  status := run_command({"python3", HARD_FAULT_ANALYSIS_SCRIPT}, cwd = REPO_ROOT)
   if status.exit_code == 0 {
     print_note("hard fault analysis completed", .Ok)
   } else {
