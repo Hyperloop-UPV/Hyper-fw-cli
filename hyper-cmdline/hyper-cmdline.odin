@@ -10,6 +10,7 @@ import "core:flags"
 Hyper_Command :: enum {
   init,
   help,
+  version,
   examples,
   run,
   build,
@@ -42,7 +43,7 @@ Hyper_StlibPreset :: enum {
 Hyper_FlagStyle :: flags.Parsing_Style.Unix
 
 Hyper_HelpCommand :: struct {
-  command: string `args:"pos=0" usage:"Hyper command to get help for, can be any of ['init', 'help', 'examples', 'run', 'build', 'flash', 'uart', 'doctor', 'hardfault-analysis', 'stlib-build', 'stlib-sim-tests']"`,
+  command: string `args:"pos=0" usage:"Hyper command to get help for, can be any of ['init', 'help', 'version', 'examples', 'run', 'build', 'flash', 'uart', 'doctor', 'hardfault-analysis', 'stlib-build', 'stlib-sim-tests']"`,
 }
 
 Hyper_ExamplesSubcommand :: enum {
@@ -115,6 +116,7 @@ Hyper_Options :: struct {
   using info: struct #raw_union {
     // Hyper_CommandInfoInit (has no fields)
     help: Hyper_HelpCommand,
+    // Hyper_CommandInfoVersion (has no fields)
     examples: Hyper_ExamplesCommand,
     build: Hyper_BuildCommand,
     flash: Hyper_FlashCommand,
@@ -132,6 +134,7 @@ get_command :: proc(cmd: string, command: ^Hyper_Command) -> bool
   switch cmd {
     case "init":               command^ = .init
     case "help":               command^ = .help
+    case "version":            command^ = .version
     case "examples":           command^ = .examples
     case "run":                command^ = .run
     case "build":              command^ = .build
@@ -141,7 +144,13 @@ get_command :: proc(cmd: string, command: ^Hyper_Command) -> bool
     case "hardfault-analysis": command^ = .hardfault_analysis
     case "stlib-build":        command^ = .stlib_build
     case "stlib-sim-tests":    command^ = .stlib_sim_tests
-    case: return false
+    case: {
+      if(cmd == "-v" || cmd == "--version") {
+        command^ = .version
+      } else {
+        return false
+      }
+    }
   }
   return true
 }
@@ -149,7 +158,7 @@ get_command :: proc(cmd: string, command: ^Hyper_Command) -> bool
 print_usage :: proc()
 {
   fmt.printfln("Usage: %s <command> [options]", os.args[0])
-  fmt.println(`Commands can be any of ["init", "help", "examples", "run", "build", "flash", "uart", "doctor", "hardfault-analysis", "stlib-build", "stlib-sim-tests"]`)
+  fmt.println(`Commands can be any of ["init", "help", "version", "examples", "run", "build", "flash", "uart", "doctor", "hardfault-analysis", "stlib-build", "stlib-sim-tests"]`)
   fmt.printfln("Use '%s help <command>' to get usage of a specific command", os.args[0])
 }
 
@@ -166,6 +175,11 @@ handle_help_command :: proc(help: Hyper_HelpCommand)
     case "help": {
       fmt.println("Get help for a specific command")
       flags.print_errors(Hyper_HelpCommand, req, usage, Hyper_FlagStyle)
+    }
+
+    case "version": {
+      fmt.println("Get Hyper-fw-cli version")
+      fmt.printfln("Usage:\n\t%s", usage)
     }
 
     case "examples": {
@@ -252,6 +266,7 @@ parse :: proc(opt: ^Hyper_Options) -> bool
   switch opt.command {
     // NOTE: nothing to parse on these
     case .init: {}
+    case .version: {}
     case .hardfault_analysis: {}
     case .stlib_sim_tests: {}
     case .doctor: {}

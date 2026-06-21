@@ -21,6 +21,12 @@ import utf8 "core:unicode/utf8"
 import platform "hyper-platform"
 import cmdline "hyper-cmdline"
 
+HYPER_VERSION_MAJOR :: "0"
+HYPER_VERSION_MINOR :: "1"
+HYPER_VERSION_PATCH :: "0"
+
+HYPER_VERSION :: HYPER_VERSION_MAJOR + "." + HYPER_VERSION_MINOR + "." + HYPER_VERSION_PATCH
+
 REPO_ROOT: string
 TOOLS_DIR: string
 STLIB_ROOT: string
@@ -1966,13 +1972,17 @@ main :: proc()
   setup_globals()
   defer free_all_globals()
 
-  platform.write_console_unicode(HELP_BANNER)
-  fmt.println()
-
   opts: cmdline.Hyper_Options
   if !cmdline.parse(&opts) {
     os.exit(1)
   }
+  if(opts.command == .version) {
+    fmt.printfln("%s v%s", os.args[0], HYPER_VERSION)
+    return
+  }
+
+  platform.write_console_unicode(HELP_BANNER)
+  fmt.println()
 
   switch opts.command {
     case .init: {
@@ -1984,6 +1994,10 @@ main :: proc()
 
     case .help: {
       cmdline.handle_help_command(opts.help)
+    }
+
+    case .version: {
+      fmt.printfln("%s v%s", os.args[0], HYPER_VERSION)
     }
 
     case .examples: {
