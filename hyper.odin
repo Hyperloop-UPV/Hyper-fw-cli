@@ -1251,18 +1251,16 @@ ensure_uv :: proc() -> string
 virtual_python_path :: proc(virt_dir: string, allocator := context.temp_allocator) -> string
 {
   when ODIN_OS == .Windows {
-    path, _ := os.join_path({REPO_ROOT, virt_dir, "Scripts", "python.exe"}, allocator)
+    path, _ := os.join_path({REPO_ROOT, virt_dir, "Scripts", "python.exe"}, context.temp_allocator)
     if os.exists(path) {
-      return path
+      return strings.clone(path, allocator)
     }
-    delete(path)
-    path, _ = os.join_path({REPO_ROOT, virt_dir, "bin", "python.exe"}, allocator)
+    path, _ = os.join_path({REPO_ROOT, virt_dir, "bin", "python.exe"}, context.temp_allocator)
     if os.exists(path) {
-      return path
+      return strings.clone(path, allocator)
     }
-    delete(path)
-    fmt.eprintfln("Could not find virtual python path in {%s, %s, Scripts|bin, python.exe}", REPO_ROOT, virt_dir)
-    return ""
+    fmt.eprintfln("Could not find virtual python path in {{%s, %s, Scripts|bin, python.exe}}", REPO_ROOT, virt_dir)
+    return strings.clone("", allocator)
   } else {
     path, _ := os.join_path({REPO_ROOT, virt_dir, "bin", "python"}, allocator)
     return path
@@ -1282,6 +1280,7 @@ setup_python_env_with_uv :: proc(uv_path: string)
     print_note("virtual environment already exists, skipping creation", .Info)
   } else {
     run_command({uv_path, "venv", venv_path})
+    python_path = virtual_python_path("virtual")
   }
   run_command({uv_path, "pip", "install", "--python", python_path, "-r", requirements_path})
   print_note("python environment ready", .Ok)
