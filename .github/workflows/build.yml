@@ -1,0 +1,45 @@
+# .github/workflows/build.yml
+name: Build binary with Debian Bullseye glibc
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:   # allow manual trigger
+
+jobs:
+  build:
+    name: Build (Debian Bullseye)
+    runs-on: ubuntu-latest
+    container:
+      image: debian:bullseye   # last supported Debian with glibc 2.31
+    steps:
+      - name: Install system dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            ca-certificates \
+            curl \
+            git \
+            build-essential \
+            llvm-15-dev \
+            clang-15
+          # Odin may require LLVM for some backends; these cover typical needs.
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Odin compiler
+        uses: laytan/setup-odin@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compile project
+        run: odin build . -out:hyper -o:speed
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hyper-linux-glibc2.31
+          path: hyper
