@@ -1,15 +1,15 @@
 # .github/workflows/build.yml
-name: Build binary with Debian Bullseye glibc
+name: Build binaries
 
 on:
   workflow_dispatch:   # manual trigger only
 
 jobs:
-  build:
-    name: Build (Debian Bullseye)
+  build-linux-x64:
+    name: Build Linux x64 (glibc 2.31)
     runs-on: ubuntu-latest
     container:
-      image: debian:bullseye   # glibc 2.31, oldest supported Debian LTS
+      image: debian:bullseye
     steps:
       - name: Install system dependencies
         run: |
@@ -20,7 +20,6 @@ jobs:
             git \
             build-essential \
             gnupg
-          # Add LLVM 14 official repository for Bullseye
           echo "deb http://apt.llvm.org/bullseye/ llvm-toolchain-bullseye-14 main" \
             > /etc/apt/sources.list.d/llvm.list
           curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key | apt-key add -
@@ -29,11 +28,8 @@ jobs:
             llvm-14-dev \
             clang-14 \
             lld-14
-          # Create symlinks so llvm-config-14 and clang-14 are directly in PATH
           ln -s /usr/bin/llvm-config-14 /usr/local/bin/llvm-config-14
           ln -s /usr/bin/clang-14 /usr/local/bin/clang
-          # Odin also needs lld-link; ensure lld-14 is available
-          ln -s /usr/bin/lld-14 /usr/local/bin/lld-link-14 2>/dev/null || true
 
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -43,15 +39,132 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Compile project
+      - name: Compile Linux x64
         run: |
           export LLVM_CONFIG=/usr/bin/llvm-config-14
-          odin build . -out:hyper -o:speed
+          odin build . -out:hyper-linux-x64 -o:speed -target:linux_amd64
         env:
           LLVM_CONFIG: /usr/bin/llvm-config-14
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: hyper-linux-glibc2.31
-          path: hyper
+          name: hyper-linux-x64
+          path: hyper-linux-x64
+
+  build-linux-arm64:
+    name: Build Linux ARM64
+    runs-on: ubuntu-latest
+    container:
+      image: debian:bullseye
+    steps:
+      - name: Install system dependencies and cross-compilation toolchain
+        run: |
+          dpkg --add-architecture arm64
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            ca-certificates \
+            curl \
+            git \
+            build-essential \
+            gnupg \
+            crossbuild-essential-arm64 \
+            libc6-dev-arm64-cross
+          echo "deb http://apt.llvm.org/bullseye/ llvm-toolchain-bullseye-14 main" \
+            > /etc/apt/sources.list.d/llvm.list
+          curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key | apt-key add -
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            llvm-14-dev \
+            clang-14 \
+            lld-14
+          ln -s /usr/bin/llvm-config-14 /usr/local/bin/llvm-config-14
+          ln -s /usr/bin/clang-14 /usr/local/bin/clang
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Odin compiler
+        uses: laytan/setup-odin@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compile Linux ARM64
+        run: |
+          export LLVM_CONFIG=/usr/bin/llvm-config-14
+          odin build . -out:hyper-linux-arm64 -o:speed -target:linux_arm64
+        env:
+          LLVM_CONFIG: /usr/bin/llvm-config-14
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hyper-linux-arm64
+          path: hyper-linux-arm64
+
+  build-macos-x64:
+    name: Build macOS x64
+    runs-on: macos-13   # last macOS Intel runner
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Odin compiler
+        uses: laytan/setup-odin@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compile macOS x64
+        run: odin build . -out:hyper-macos-x64 -o:speed -target:darwin_amd64
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hyper-macos-x64
+          path: hyper-macos-x64
+
+  build-macos-arm64:
+    name: Build macOS ARM64
+    runs-on: macos-latest   # Apple Silicon runner
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Odin compiler
+        uses: laytan/setup-odin@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compile macOS ARM64
+        run: odin build . -out:hyper-macos-arm64 -o:speed -target:darwin_arm64
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hyper-macos-arm64
+          path: hyper-macos-arm64
+
+  build-windows-x64:
+    name: Build Windows x64
+    runs-on: windows-latest
+    steps:
+      - name: Install Odin compiler
+        shell: powershell
+        run: |
+          $url = "https://github.com/odin-lang/Odin/releases/latest/download/odin-windows-amd64.zip"
+          Invoke-WebRequest -Uri $url -OutFile odin.zip
+          Expand-Archive -Path odin.zip -DestinationPath odin
+          echo "${{ github.workspace }}\odin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Compile Windows x64
+        shell: cmd
+        run: odin build . -out:hyper-windows-x64.exe -o:speed -target:windows_amd64
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hyper-windows-x64
+          path: hyper-windows-x64.exe
