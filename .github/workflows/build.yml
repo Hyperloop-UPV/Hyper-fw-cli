@@ -2,18 +2,14 @@
 name: Build binary with Debian Bullseye glibc
 
 on:
-  push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
-  workflow_dispatch:   # allow manual trigger
+  workflow_dispatch:   # manual trigger only
 
 jobs:
   build:
     name: Build (Debian Bullseye)
     runs-on: ubuntu-latest
     container:
-      image: debian:bullseye   # last supported Debian with glibc 2.31
+      image: debian:bullseye   # glibc 2.31, oldest supported Debian LTS
     steps:
       - name: Install system dependencies
         run: |
@@ -23,9 +19,21 @@ jobs:
             curl \
             git \
             build-essential \
-            llvm-15-dev \
-            clang-15
-          # Odin may require LLVM for some backends; these cover typical needs.
+            gnupg
+          # Add LLVM 14 official repository for Bullseye
+          echo "deb http://apt.llvm.org/bullseye/ llvm-toolchain-bullseye-14 main" \
+            > /etc/apt/sources.list.d/llvm.list
+          curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key | apt-key add -
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            llvm-14-dev \
+            clang-14 \
+            lld-14
+          # Create symlinks so llvm-config-14 and clang-14 are directly in PATH
+          ln -s /usr/bin/llvm-config-14 /usr/local/bin/llvm-config-14
+          ln -s /usr/bin/clang-14 /usr/local/bin/clang
+          # Odin also needs lld-link; ensure lld-14 is available
+          ln -s /usr/bin/lld-14 /usr/local/bin/lld-link-14 2>/dev/null || true
 
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -36,7 +44,11 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Compile project
-        run: odin build . -out:hyper -o:speed
+        run: |
+          export LLVM_CONFIG=/usr/bin/llvm-config-14
+          odin build . -out:hyper -o:speed
+        env:
+          LLVM_CONFIG: /usr/bin/llvm-config-14
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
