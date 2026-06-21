@@ -53,56 +53,56 @@ jobs:
           path: hyper-linux-x64
 
   build-linux-arm64:
-  name: Build Linux ARM64
-  runs-on: ubuntu-latest
-  container:
-    image: debian:bullseye
-  steps:
-    - name: Install system dependencies and cross-compilation toolchain
-      run: |
-        dpkg --add-architecture arm64
-        apt-get update
-        apt-get install -y --no-install-recommends \
-          ca-certificates \
-          curl \
-          git \
-          build-essential \
-          gnupg \
-          crossbuild-essential-arm64 \
-          libc6-dev-arm64-cross \
-          clang-14 \
-          lld-14
-        # Create a wrapper script for the ARM64 linker
-        cat > /usr/local/bin/aarch64-linux-gnu-ld << 'EOF'
-        #!/bin/sh
-        exec /usr/bin/ld.lld-14 --target=aarch64-linux-gnu "$@"
-        EOF
-        chmod +x /usr/local/bin/aarch64-linux-gnu-ld
-        # Create symlink for LLVM config
-        ln -s /usr/bin/llvm-config-14 /usr/local/bin/llvm-config
+    name: Build Linux ARM64
+    runs-on: ubuntu-latest
+    container:
+      image: debian:bullseye
+    steps:
+      - name: Install system dependencies and cross-compilation toolchain
+        run: |
+          dpkg --add-architecture arm64
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            ca-certificates \
+            curl \
+            git \
+            build-essential \
+            gnupg \
+            crossbuild-essential-arm64 \
+            libc6-dev-arm64-cross \
+            clang-14 \
+            lld-14
+          # Create a wrapper script for the ARM64 linker
+          cat > /usr/local/bin/aarch64-linux-gnu-ld << 'EOF'
+          #!/bin/sh
+          exec /usr/bin/ld.lld-14 --target=aarch64-linux-gnu "$@"
+          EOF
+          chmod +x /usr/local/bin/aarch64-linux-gnu-ld
+          # Create symlink for LLVM config
+          ln -s /usr/bin/llvm-config-14 /usr/local/bin/llvm-config
 
-    - name: Checkout repository
-      uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-    - name: Setup Odin compiler
-      uses: laytan/setup-odin@v2
-      with:
-        token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Setup Odin compiler
+        uses: laytan/setup-odin@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: Compile Linux ARM64
-      run: |
-        export LLVM_CONFIG=/usr/local/bin/llvm-config
-        export CC="clang-14 --target=aarch64-linux-gnu"
-        export CXX="clang++-14 --target=aarch64-linux-gnu"
-        export AR="llvm-ar-14"
-        export LD="aarch64-linux-gnu-ld"
-        odin build . -out:hyper-linux-arm64 -o:speed -target:linux_arm64
+      - name: Compile Linux ARM64
+        run: |
+          export LLVM_CONFIG=/usr/local/bin/llvm-config
+          export CC="clang-14 --target=aarch64-linux-gnu"
+          export CXX="clang++-14 --target=aarch64-linux-gnu"
+          export AR="llvm-ar-14"
+          export LD="aarch64-linux-gnu-ld"
+          odin build . -out:hyper-linux-arm64 -o:speed -target:linux_arm64
 
-    - name: Upload artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: hyper-linux-arm64
-        path: hyper-linux-arm64
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hyper-linux-arm64
+          path: hyper-linux-arm64
 
   build-macos-x64:
     name: Build macOS x64
