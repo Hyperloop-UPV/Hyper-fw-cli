@@ -7,7 +7,7 @@ This is a utility program to use for HyperloopUPV Firmware subsystem
 ```
 hyper <command> [options]
 ```
-Commmand can be any of ["init", "help", "examples", "run", "build", "flash", "uart", "doctor", "hardfault-analysis", "stlib-build", "stlib-sim-tests"]
+Commmand can be any of ["init", "help", "version", "examples", "run", "build", "flash", "uart", "doctor", "hardfault-analysis", "stlib-build", "stlib-sim-tests"]
 
 Use `hyper help <command>` to get usage of a specific command
 
