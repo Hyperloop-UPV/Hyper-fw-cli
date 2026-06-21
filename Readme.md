@@ -11,7 +11,7 @@ Commmand can be any of ["init", "help", "version", "examples", "run", "build", "
 
 Use `hyper help <command>` to get usage of a specific command
 
-Prebuilt binaries _soon_ ™
+Prebuilt binaries for macos arm64 and linux x64 and arm64 can be found [here](https://github.com/Hyperloop-UPV/Hyper-fw-cli/actions/workflows/build.yml)
 
 ### Building
 
