@@ -78,8 +78,15 @@ jobs:
             llvm-14-dev \
             clang-14 \
             lld-14
+          # Create symlinks for LLVM tools
           ln -s /usr/bin/llvm-config-14 /usr/local/bin/llvm-config-14
           ln -s /usr/bin/clang-14 /usr/local/bin/clang
+          # Create a wrapper to use ARM64 linker for cross-compilation
+          cat > /usr/local/bin/aarch64-linux-gnu-ld.lld << 'EOF'
+          #!/bin/sh
+          exec /usr/bin/ld.lld-14 --target=aarch64-linux-gnu "$@"
+          EOF
+          chmod +x /usr/local/bin/aarch64-linux-gnu-ld.lld
 
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -92,6 +99,8 @@ jobs:
       - name: Compile Linux ARM64
         run: |
           export LLVM_CONFIG=/usr/bin/llvm-config-14
+          export CC="clang-14 --target=aarch64-linux-gnu"
+          export CFLAGS="-fuse-ld=lld --target=aarch64-linux-gnu"
           odin build . -out:hyper-linux-arm64 -o:speed -target:linux_arm64
         env:
           LLVM_CONFIG: /usr/bin/llvm-config-14
@@ -151,8 +160,15 @@ jobs:
       - name: Install Odin compiler
         shell: powershell
         run: |
-          $url = "https://github.com/odin-lang/Odin/releases/latest/download/odin-windows-amd64.zip"
-          Invoke-WebRequest -Uri $url -OutFile odin.zip
+          $apiUrl = "https://api.github.com/repos/odin-lang/Odin/releases/latest"
+          $release = Invoke-RestMethod -Uri $apiUrl
+          $asset = $release.assets | Where-Object { $_.name -like "*windows-amd64*.zip" } | Select-Object -First 1
+          if (-not $asset) {
+            Write-Error "Could not find Windows AMD64 asset in latest release"
+            exit 1
+          }
+          Write-Host "Downloading $($asset.name)..."
+          Invoke-WebRequest -Uri $asset.browser_download_url -OutFile odin.zip
           Expand-Archive -Path odin.zip -DestinationPath odin
           echo "${{ github.workspace }}\odin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
