@@ -22,8 +22,8 @@ import platform "hyper-platform"
 import cmdline "hyper-cmdline"
 
 HYPER_VERSION_MAJOR :: "0"
-HYPER_VERSION_MINOR :: "1"
-HYPER_VERSION_PATCH :: "1"
+HYPER_VERSION_MINOR :: "2"
+HYPER_VERSION_PATCH :: "0"
 
 HYPER_VERSION :: HYPER_VERSION_MAJOR + "." + HYPER_VERSION_MINOR + "." + HYPER_VERSION_PATCH
 
