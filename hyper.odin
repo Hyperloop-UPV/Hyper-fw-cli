@@ -23,7 +23,7 @@ import cmdline "hyper-cmdline"
 
 HYPER_VERSION_MAJOR :: "0"
 HYPER_VERSION_MINOR :: "1"
-HYPER_VERSION_PATCH :: "0"
+HYPER_VERSION_PATCH :: "1"
 
 HYPER_VERSION :: HYPER_VERSION_MAJOR + "." + HYPER_VERSION_MINOR + "." + HYPER_VERSION_PATCH
 
@@ -1158,6 +1158,49 @@ ensure_required_clt :: proc() -> bool
   return true
 }
 
+ensure_required_toolchain :: proc(require_cmake := true) -> bool
+{
+  check_path :: proc(path, tool: string, ignore := false) -> bool
+  {
+    if path == "" {
+      if ignore {
+        fmt.eprintfln("Missing %s from path. You might need it for other configurations.", tool)
+      } else {
+        fmt.eprintfln("Missing %s from path", tool)
+        return false
+      }
+    }
+    return true
+  }
+
+  ok := true
+  armtools_search := []string{
+    "arm-none-eabi-gdb",
+    "arm-none-eabi-gcc",
+    "arm-none-eabi-as",
+    "arm-none-eabi-ld",
+  }
+  for tool in armtools_search {
+    path := command_path(tool, context.temp_allocator)
+    if !check_path(path, tool) {
+      ok = false
+    }
+  }
+
+  cmaketools_search := []string{
+    "cmake",
+    "ninja",
+  }
+  for tool in cmaketools_search {
+    path := command_path(tool, context.temp_allocator)
+    if !check_path(path, tool, !require_cmake) {
+      ok = false
+    }
+  }
+
+  return ok
+}
+
 known_uv_paths :: proc(allocator := context.allocator) -> []string
 {
   home_dir, _ := os.user_home_dir(context.temp_allocator)
@@ -1972,6 +2015,9 @@ main :: proc()
   setup_globals()
   defer free_all_globals()
 
+  platform.write_console_unicode(HELP_BANNER)
+  fmt.println()
+
   opts: cmdline.Hyper_Options
   if !cmdline.parse(&opts) {
     os.exit(1)
@@ -1981,14 +2027,23 @@ main :: proc()
     return
   }
 
-  platform.write_console_unicode(HELP_BANNER)
-  fmt.println()
-
   switch opts.command {
     case .init: {
-      ensure_required_clt()
+      if !ensure_required_clt() {
+        break
+      }
+
+      if !ensure_required_toolchain() {
+        break
+      }
+
       uv_path := ensure_uv()
+      if uv_path == "" {
+        break
+      }
+
       setup_python_env_with_uv(uv_path)
+
       init_repo()
     }
 
