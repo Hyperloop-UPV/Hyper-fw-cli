@@ -1350,16 +1350,25 @@ run_build_example :: proc(example, test: string, no_test: bool, preset, board_na
   if !ensure_file(BUILD_EXAMPLE_SCRIPT, "build-example helper") {
     return false
   }
-  main_targets := []string{"main", "default"}
+  main_targets := []string{"", "main", "default"}
   is_main_target := slice.contains(main_targets, strings.to_lower(example, context.temp_allocator))
   selected_test := "none" if no_test || is_main_target else test
   if selected_test == "" { selected_test = "default" }
-  print_action("Build", {
-    {"example", example},
-    {"preset", preset},
-    {"test", selected_test},
-    {"board_name", board_name if board_name != "" else "default"},
-  })
+
+  if is_main_target {
+    print_action("Build", {
+      {"preset", preset},
+      {"test", selected_test},
+      {"board_name", board_name if board_name != "" else "default"},
+    })
+  } else {
+    print_action("Build", {
+      {"example", example},
+      {"preset", preset},
+      {"test", selected_test},
+      {"board_name", board_name if board_name != "" else "default"},
+    })
+  }
 
   cmd := make([dynamic]string, context.temp_allocator)
   append(&cmd, BUILD_EXAMPLE_SCRIPT)
