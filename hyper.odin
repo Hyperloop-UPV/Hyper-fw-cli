@@ -1344,9 +1344,8 @@ ensure_file :: proc(path, label: string) -> bool
   return true
 }
 
-run_build_example :: proc(example, test: string, no_test: bool, preset, board_name: string, extra_cxx_flags: []string, jobs: int) -> bool
+run_build_example_script :: proc(example, test: string, no_test: bool, preset, board_name: string, extra_cxx_flags: []string, jobs: int) -> bool
 {
-  preset := preset
   if !ensure_file(BUILD_EXAMPLE_SCRIPT, "build-example helper") {
     return false
   }
@@ -1373,7 +1372,6 @@ run_build_example :: proc(example, test: string, no_test: bool, preset, board_na
   cmd := make([dynamic]string, context.temp_allocator)
   append(&cmd, BUILD_EXAMPLE_SCRIPT)
   if example != "" { append(&cmd, "--example", example) }
-  if preset == "" { preset = DEFAULT_PRESET }
   append(&cmd, "--preset", preset)
   if no_test { append(&cmd, "--no-test") }
   else if test != "" { append(&cmd, "--test", test) }
@@ -1390,6 +1388,280 @@ run_build_example :: proc(example, test: string, no_test: bool, preset, board_na
     print_note(fmt.tprintf("Could not complete build. Exit code: %d", status.exit_code), .Wrong)
   }
   return status.exit_code == 0
+}
+
+run_build_example :: proc(example, test: string, no_test: bool, preset, board_name: string, extra_cxx_flags: []string, jobs: int, use_script: bool = false) -> bool
+{
+  preset := preset
+  if preset == "" {
+    preset = DEFAULT_PRESET
+  }
+  if use_script {
+    return run_build_example_script(example, test, no_test, preset, board_name, extra_cxx_flags, jobs)
+  }
+
+  sanitize_path_fragment :: proc(name: string) -> string {
+    builder := strings.builder_make(context.temp_allocator)
+    for r in name {
+      if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '-' {
+        strings.write_rune(&builder, r)
+      } else {
+        strings.write_byte(&builder, '_')
+      }
+    }
+    return strings.to_lower(strings.to_string(builder), context.allocator)
+  }
+
+  normalize_example_macro :: proc(input: string) -> string {
+    lower := strings.to_lower(input, context.temp_allocator)
+    if lower == "main" || lower == "default" {
+        return "MAIN"
+    }
+    base := input
+    if strings.has_prefix(lower, "example_") {
+      base = input[len("example_"):]
+    }
+    underscored, _ := strings.replace_all(base, "-", "_", context.temp_allocator)
+    normalized := strings.to_upper(underscored, context.temp_allocator)
+    return strings.concatenate({"EXAMPLE_", normalized})
+  }
+
+  normalize_test_macro :: proc(input: string) -> string {
+    lower := strings.to_lower(input, context.temp_allocator)
+    // If it's a plain number, just wrap it
+    if _, ok := strconv.parse_int(input); ok {
+      return strings.concatenate({"TEST_", input})
+    }
+    base := input
+    if strings.has_prefix(lower, "test_") {
+      base = input[len("test_"):]
+    }
+    underscored, _ := strings.replace_all(base, "-", "_", context.temp_allocator)
+    normalized := strings.to_upper(underscored, context.temp_allocator)
+    return strings.concatenate({"TEST_", normalized})
+  }
+
+  collect_examples :: proc() -> (macros: [dynamic]string, file_map: map[string]string) {
+    examples_dir, _ := os.join_path({REPO_ROOT, "Core", "Src", "Examples"}, context.temp_allocator)
+    pattern, _ := os.join_path({examples_dir, "*.cpp"}, context.temp_allocator)
+    files, err := os.glob(pattern, context.temp_allocator)
+    if err != nil {
+      return
+    }
+
+    macro_pattern := `EXAMPLE_[A-Z0-9_]+`
+    file_map = make(map[string]string, context.allocator)
+
+    for file in files {
+      data, read_err := os.read_entire_file(file, context.temp_allocator)
+      if read_err != nil {
+        continue
+      }
+      text := string(data)
+
+      it, iter_err := regex.create_iterator(text, macro_pattern, {})
+      if iter_err != nil {
+        fmt.eprintfln("Could not create iterator for %s: %v", file, iter_err)
+        continue
+      }
+      defer regex.destroy_iterator(it)
+
+      for {
+        cap, _, ok := regex.match_iterator(&it)
+        if !ok {
+          break
+        }
+        macro := cap.groups[0]
+        if _, exists := file_map[macro]; !exists {
+          file_map[macro] = file
+          append(&macros, macro)
+        }
+        regex.destroy_capture(cap)
+      }
+    }
+    return
+  }
+
+  find_example_file :: proc(example_macro: string) -> (file_path: string, ok: bool) {
+    macros, file_map := collect_examples()
+    defer delete(macros)
+    defer delete(file_map)
+    path, exists := file_map[example_macro]
+    return path, exists
+  }
+
+  collect_tests_for_file :: proc(file_path: string) -> [dynamic]string {
+    if file_path == "" {
+      return {}
+    }
+    data, read_err := os.read_entire_file(file_path, context.temp_allocator)
+    if read_err != nil {
+      return {}
+    }
+    text := string(data)
+    test_pattern := `TEST_[A-Z0-9_]+`
+
+    tests := make([dynamic]string, context.allocator)
+    seen := make(map[string]bool, context.allocator)
+
+    it, err := regex.create_iterator(text, test_pattern, {})
+    if err != nil {
+      fmt.eprintfln("Could not create iterator for %s: %v", file_path, err)
+      return tests
+    }
+    defer regex.destroy_iterator(it)
+
+    for {
+      cap, _, ok := regex.match_iterator(&it)
+      if !ok {
+        break
+      }
+      test_macro := cap.groups[0]
+      if !seen[test_macro] {
+        seen[test_macro] = true
+        append(&tests, test_macro)
+      }
+      regex.destroy_capture(cap)
+    }
+    return tests
+  }
+
+  // start function
+  example_macro: string
+  if example == "" {
+    example_macro = "MAIN"
+  } else {
+    example_macro = normalize_example_macro(example)
+  }
+  is_main := example_macro == "MAIN"
+
+  available_macros: [dynamic]string
+  file_map: map[string]string
+  if !is_main {
+    available_macros, file_map = collect_examples()
+    defer delete(available_macros)
+    defer delete(file_map)
+
+    found := false
+    for macro in available_macros {
+      if macro == example_macro {
+        found = true
+        break
+      }
+    }
+    if !found {
+      fmt.eprintfln("Unknown example macro '%s'.", example_macro)
+      fmt.eprintln("Available examples:")
+      for macro in available_macros {
+        fmt.eprintfln("  - %s", macro)
+      }
+      return false
+    }
+  }
+
+  test_macro: string
+  if no_test {
+    test_macro = ""
+  } else if test != "" {
+    test_macro = normalize_test_macro(test)
+    if is_main {
+      fmt.eprintln("Target 'main' does not support TEST_* macros.")
+      return false
+    }
+  } else {
+    if is_main {
+      test_macro = ""
+    } else {
+      file_path := file_map[example_macro]
+      tests := collect_tests_for_file(file_path)
+      defer delete(tests)
+      if len(tests) > 0 {
+        test_macro = "TEST_0"
+      } else {
+        test_macro = ""
+      }
+    }
+  }
+
+  define_flags: string
+  if !is_main {
+    if test_macro != "" {
+      define_flags = strings.join(a = {
+        "-D", example_macro,
+        " -D", test_macro,
+      }, sep = "", allocator = context.temp_allocator)
+    } else {
+      define_flags = strings.join(a = {
+        "-D", example_macro,
+      }, sep = "", allocator = context.temp_allocator)
+    }
+  } else {
+    if test_macro != "" {
+      fmt.eprintln("Target 'main' does not support TEST_* macros.")
+      return false
+    }
+  }
+
+  build_examples := "OFF" if is_main else "ON"
+
+  preset_san := sanitize_path_fragment(preset)
+  example_san := sanitize_path_fragment(example_macro)
+  test_san := "no_test"
+  if test_macro != "" {
+    test_san = sanitize_path_fragment(test_macro)
+  }
+  binary_dir, _ := os.join_path({REPO_ROOT, "out", "build", "examples", preset_san, example_san, test_san}, context.allocator) // TODO: make this context.temp_allocator
+
+  details := make([dynamic][2]string, context.temp_allocator)
+  if is_main {
+    append(&details, [2]string{"example", "main"})
+  } else {
+    append(&details, [2]string{"example", example_macro})
+  }
+  append(&details, [2]string{"preset", preset})
+  if test_macro != "" {
+    append(&details, [2]string{"test", test_macro})
+  } else {
+    append(&details, [2]string{"test", "<none>"})
+  }
+  if board_name != "" {
+    append(&details, [2]string{"board_name", board_name})
+  }
+  if len(extra_cxx_flags) > 0 {
+    append(&details, [2]string{"extra_cxx_flags", strings.join(extra_cxx_flags, " ", context.temp_allocator)})
+  }
+  print_action("Build", details[:])
+
+  configure_cmd := make([dynamic]string, context.temp_allocator)
+  append(&configure_cmd, "cmake", "--preset", preset, "-B", binary_dir)
+  append(&configure_cmd, fmt.tprintf("-DBUILD_EXAMPLES=%s", build_examples))
+  append(&configure_cmd, "-DCMAKE_EXPORT_COMPILE_COMMANDS=OFF")
+  if define_flags != "" {
+    append(&configure_cmd, fmt.tprintf("-DCMAKE_CXX_FLAGS=\"%s\"", define_flags))
+  }
+  if board_name != "" {
+    append(&configure_cmd, fmt.tprintf("-DBOARD_NAME=%s", board_name))
+  }
+
+  state := run_command(configure_cmd[:], REPO_ROOT)
+  if state.exit_code != 0 {
+    print_note(fmt.tprintf("CMake configure failed. Exit code: %d", state.exit_code), .Wrong)
+    return false
+  }
+
+  build_cmd := make([dynamic]string, context.temp_allocator)
+  append(&build_cmd, "cmake", "--build", binary_dir)
+  if jobs > 0 {
+    append(&build_cmd, "-j", fmt.tprint(jobs))
+  }
+  state = run_command(build_cmd[:], REPO_ROOT)
+  if state.exit_code != 0 {
+    print_note(fmt.tprintf("Build failed. Exit code: %d", state.exit_code), .Wrong)
+    return false
+  }
+
+  print_note("build completed", .Ok)
+  return true
 }
 
 resolve_flash_method :: proc(req: cmdline.Hyper_FlashMethod) -> cmdline.Hyper_FlashMethod
@@ -1922,6 +2194,7 @@ command_run :: proc(run: ^cmdline.Hyper_RunCommand) -> bool
     board_name = run.board_name,
     extra_cxx_flags = run.overflow[:] if run.extra_cxx_flags != "" else nil,
     jobs = run.jobs,
+    use_script = run.use_script,
   )
   if !build_ok {
     fmt.eprintfln("Failed to build")
@@ -2078,6 +2351,7 @@ main :: proc()
         board_name = opts.build.board_name,
         extra_cxx_flags = opts.build.overflow[:] if opts.build.extra_cxx_flags != "" else nil,
         jobs = opts.build.jobs,
+        use_script = opts.build.use_script,
       )
     }
 
