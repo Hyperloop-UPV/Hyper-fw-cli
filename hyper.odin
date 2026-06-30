@@ -2030,16 +2030,16 @@ main :: proc()
   switch opts.command {
     case .init: {
       if !ensure_required_clt() {
-        break
+        os.exit(2)
       }
 
       if !ensure_required_toolchain() {
-        break
+        os.exit(2)
       }
 
       uv_path := ensure_uv()
       if uv_path == "" {
-        break
+        os.exit(2)
       }
 
       setup_python_env_with_uv(uv_path)
