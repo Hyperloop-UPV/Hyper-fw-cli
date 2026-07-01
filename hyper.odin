@@ -23,7 +23,7 @@ import cmdline "hyper-cmdline"
 
 HYPER_VERSION_MAJOR :: "0"
 HYPER_VERSION_MINOR :: "2"
-HYPER_VERSION_PATCH :: "1"
+HYPER_VERSION_PATCH :: "2"
 
 HYPER_VERSION :: HYPER_VERSION_MAJOR + "." + HYPER_VERSION_MINOR + "." + HYPER_VERSION_PATCH
 
@@ -2034,6 +2034,13 @@ command_doctor :: proc() -> bool
     }
   }
 
+  section_title("Toolchain")
+  if ensure_required_toolchain() {
+    print_note("installed correctly", .Ok)
+  } else {
+    print_note("missing some tools", .Wrong)
+  }
+
   issues: [dynamic]string
   arm_gcc, programmer, clt_version := inspect_clt()
   uv_path := uv_executable_path()
@@ -2389,4 +2396,3 @@ main :: proc()
     }
   }
 }
-
