@@ -1187,6 +1187,13 @@ ensure_required_toolchain :: proc(require_cmake := true) -> bool
     }
   }
 
+  gccpath := command_path("gcc", context.temp_allocator)
+  clangpath := command_path("clang", context.temp_allocator)
+  if gccpath == "" && clangpath == "" {
+    check_path("", "gcc or clang")
+    ok = false
+  }
+
   gitpath := command_path("git", context.temp_allocator)
   if !check_path(gitpath, "git") {
     ok = false
