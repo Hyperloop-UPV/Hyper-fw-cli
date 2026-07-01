@@ -10,6 +10,7 @@ import "core:fmt"
 import "core:mem"
 import "core:time"
 import "core:slice"
+import "core:dynlib"
 import "core:strings"
 import "core:strconv"
 import "core:reflect"
@@ -1356,6 +1357,301 @@ ensure_file :: proc(path, label: string) -> bool
   return true
 }
 
+sanitize_path_fragment :: proc(name: string) -> string {
+  builder := strings.builder_make(context.temp_allocator)
+  for r in name {
+    if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '-' {
+      strings.write_rune(&builder, r)
+    } else {
+      strings.write_byte(&builder, '_')
+    }
+  }
+  return strings.to_lower(strings.to_string(builder), context.allocator)
+}
+
+normalize_example_macro :: proc(input: string) -> string {
+  lower := strings.to_lower(input, context.temp_allocator)
+  if lower == "main" || lower == "default" {
+      return "MAIN"
+  }
+  base := input
+  if strings.has_prefix(lower, "example_") {
+    base = input[len("example_"):]
+  }
+  underscored, _ := strings.replace_all(base, "-", "_", context.temp_allocator)
+  normalized := strings.to_upper(underscored, context.temp_allocator)
+  return strings.concatenate({"EXAMPLE_", normalized})
+}
+
+normalize_test_macro :: proc(input: string) -> string {
+  lower := strings.to_lower(input, context.temp_allocator)
+  // If it's a plain number, just wrap it
+  if _, ok := strconv.parse_int(input); ok {
+    return strings.concatenate({"TEST_", input})
+  }
+  base := input
+  if strings.has_prefix(lower, "test_") {
+    base = input[len("test_"):]
+  }
+  underscored, _ := strings.replace_all(base, "-", "_", context.temp_allocator)
+  normalized := strings.to_upper(underscored, context.temp_allocator)
+  return strings.concatenate({"TEST_", normalized})
+}
+
+collect_examples :: proc() -> (macros: [dynamic]string, file_map: map[string]string) {
+  examples_dir, _ := os.join_path({REPO_ROOT, "Core", "Src", "Examples"}, context.temp_allocator)
+  pattern, _ := os.join_path({examples_dir, "*.cpp"}, context.temp_allocator)
+  files, err := os.glob(pattern, context.temp_allocator)
+  if err != nil {
+    return
+  }
+
+  macro_pattern := `EXAMPLE_[A-Z0-9_]+`
+  file_map = make(map[string]string, context.allocator)
+
+  for file in files {
+    data, read_err := os.read_entire_file(file, context.temp_allocator)
+    if read_err != nil {
+      continue
+    }
+    text := string(data)
+
+    it, iter_err := regex.create_iterator(text, macro_pattern, {})
+    if iter_err != nil {
+      fmt.eprintfln("Could not create iterator for %s: %v", file, iter_err)
+      continue
+    }
+    defer regex.destroy_iterator(it)
+
+    for {
+      cap, _, ok := regex.match_iterator(&it)
+      if !ok {
+        break
+      }
+      macro := cap.groups[0]
+      if _, exists := file_map[macro]; !exists {
+        file_map[macro] = file
+        append(&macros, macro)
+      }
+      regex.destroy_capture(cap)
+    }
+  }
+  return
+}
+
+find_example_file :: proc(example_macro: string) -> (file_path: string, ok: bool) {
+  macros, file_map := collect_examples()
+  defer delete(macros)
+  defer delete(file_map)
+  path, exists := file_map[example_macro]
+  return path, exists
+}
+
+collect_tests_for_file :: proc(file_path: string) -> [dynamic]string {
+  if file_path == "" {
+    return {}
+  }
+  data, read_err := os.read_entire_file(file_path, context.temp_allocator)
+  if read_err != nil {
+    return {}
+  }
+  text := string(data)
+  test_pattern := `TEST_[A-Z0-9_]+`
+
+  tests := make([dynamic]string, context.allocator)
+  seen := make(map[string]bool, context.allocator)
+
+  it, err := regex.create_iterator(text, test_pattern, {})
+  if err != nil {
+    fmt.eprintfln("Could not create iterator for %s: %v", file_path, err)
+    return tests
+  }
+  defer regex.destroy_iterator(it)
+
+  for {
+    cap, _, ok := regex.match_iterator(&it)
+    if !ok {
+      break
+    }
+    test_macro := cap.groups[0]
+    if !seen[test_macro] {
+      seen[test_macro] = true
+      append(&tests, test_macro)
+    }
+    regex.destroy_capture(cap)
+  }
+  return tests
+}
+
+Hyper_Compile_Type :: enum {
+  Executable = 0,
+  Object,
+  DynamicLibrary,
+  StaticLibrary,
+}
+
+Hyper_Optimization_Option :: enum {
+  Nothing = 0,
+  Speed = 1, /* -O3 for gcc, clang */
+  Size = 2, /* -Os for gcc, clang */
+}
+
+Hyper_Compile_Ctx :: struct {
+  // c compiler (all compilers are assumed to have the same flag style as gcc)
+  cc: string,
+  // executable by default
+  type: Hyper_Compile_Type,
+  optimize: Hyper_Optimization_Option,
+
+  debug: bool,
+  /* adds "-Wl,--gc-sections" or nothing */
+  gcSections: bool,
+  /* adds "-Wall -Wextra" or nothing */
+  warnings: bool,
+  /* adds "-Werror" or nothing */
+  warningsAsErrors: bool,
+  sourceFiles: []string,
+
+  output: string,
+  outputDirectory: string,
+  outputExtension: string,
+  
+  includePaths: []string,
+  extraCompilerFlags: []string,
+
+  libPaths: []string,
+  libs: []string,
+}
+
+get_filepath_from_compile_ctx :: proc(ctx: Hyper_Compile_Ctx) -> string
+{
+  output := fmt.tprintf("%s/%s", ctx.outputDirectory, ctx.output)
+  if output == "" && (ctx.type != .Object) {
+    fmt.eprintln("Output path must be specified unless compiling for object file")
+    return output
+  }
+
+  if ctx.outputExtension != "" {
+    return fmt.tprintf("%s%s", output, ctx.outputExtension)
+  }
+
+  when ODIN_OS == .Windows {
+    if ctx.type == .Executable {
+      return fmt.tprintf("%s.exe", output)
+    }
+  }
+
+  if ctx.type == .Object {
+    if output != "" {
+      return fmt.tprintf("%s.o", output)
+    }
+  } else if ctx.type == .DynamicLibrary {
+    return fmt.tprintf("%s" + dynlib.LIBRARY_FILE_EXTENSION, output)
+  } else if ctx.type == .StaticLibrary {
+    return fmt.tprintf("%s.o", output)
+  }
+  return output
+}
+
+// Only checks the filetime of all the input files vs output file
+// returns 1 on need rebuild, -1 on error and 0 if not need rebuild
+needs_rebuild :: proc(out: string, input_paths: []string) -> int
+{
+  outTime, err := os.modification_time_by_path(out)
+  if err != nil {
+    return 1
+  }
+
+  for path in input_paths {
+    inTime: time.Time
+    inTime, err = os.modification_time_by_path(path)
+    if err != nil {
+      return -1
+    }
+
+    if time.diff(inTime, outTime) > 0 {
+      return 1
+    }
+  }
+
+  return 0
+}
+
+needs_c_rebuild :: proc(ctx: Hyper_Compile_Ctx) -> int
+{
+  cmd := make([dynamic]string, context.temp_allocator)
+  append(&cmd, ctx.cc, "-MM")
+
+  output := get_filepath_from_compile_ctx(ctx)
+
+  needsRebuildSimple := needs_rebuild(output, ctx.sourceFiles)
+  if needsRebuildSimple != 0 {
+    return needsRebuildSimple
+  }
+
+  append(&cmd, ..ctx.sourceFiles[:])
+  for path in ctx.includePaths {
+    append(&cmd, "-I", path)
+  }
+
+  desc := os.Process_Desc {
+    command = cmd[:],
+  }
+  state, stdout, _, err := os.process_exec(desc, context.temp_allocator)
+  if state.exit_code != 0 || err != nil {
+    fmt.eprintfln("Failed to check if %s needs rebuild", ctx.output)
+    return -1
+  }
+
+  includes := make([dynamic]string, context.temp_allocator)
+  data := string(stdout)
+
+  // output from gcc is structured like this:
+  // file1.o: file1.c <include list>
+  // file2.o: file2.c <include list>
+  // etc.
+  lines := strings.split_lines(data, context.temp_allocator)
+  for i := 0; i < len(lines); i += 1 {
+    line := lines[i]
+    // NOTE: "file.o: "
+    _, _, line = strings.partition(line, ": ")
+    // NOTE: "file.c"
+    _, _, line = strings.partition(line, " ")
+
+    for len(line) > 0 {
+      inc: string
+      inc, _, line = strings.partition(line, " ")
+      if inc[0] == '\\' {
+        /* Skip '\n' and ' ' after '\n' */
+        i += 1
+        line = lines[i][1:]
+        continue
+      }
+
+      append(&includes, inc)
+    }
+  }
+
+  outTime, time_err := os.modification_time_by_path(ctx.output)
+  if time_err != nil {
+    return 1
+  }
+
+  for path in includes {
+    inTime: time.Time
+    inTime, time_err = os.modification_time_by_path(path)
+    if time_err != nil {
+      return -1
+    }
+
+    if time.diff(inTime, outTime) > 0 {
+      return 1
+    }
+  }
+
+  return 0
+}
+
 run_build_example_script :: proc(example, test: string, no_test: bool, preset, board_name: string, extra_cxx_flags: []string, jobs: int) -> bool
 {
   if !ensure_file(BUILD_EXAMPLE_SCRIPT, "build-example helper") {
@@ -1402,143 +1698,8 @@ run_build_example_script :: proc(example, test: string, no_test: bool, preset, b
   return status.exit_code == 0
 }
 
-run_build_example :: proc(example, test: string, no_test: bool, preset, board_name: string, extra_cxx_flags: []string, jobs: int, use_script: bool = false) -> bool
+run_build_example_cmake :: proc(example, test: string, no_test: bool, preset, board_name: string, extra_cxx_flags: []string, jobs: int) -> bool
 {
-  preset := preset
-  if preset == "" {
-    preset = DEFAULT_PRESET
-  }
-  if use_script {
-    return run_build_example_script(example, test, no_test, preset, board_name, extra_cxx_flags, jobs)
-  }
-
-  sanitize_path_fragment :: proc(name: string) -> string {
-    builder := strings.builder_make(context.temp_allocator)
-    for r in name {
-      if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '-' {
-        strings.write_rune(&builder, r)
-      } else {
-        strings.write_byte(&builder, '_')
-      }
-    }
-    return strings.to_lower(strings.to_string(builder), context.allocator)
-  }
-
-  normalize_example_macro :: proc(input: string) -> string {
-    lower := strings.to_lower(input, context.temp_allocator)
-    if lower == "main" || lower == "default" {
-        return "MAIN"
-    }
-    base := input
-    if strings.has_prefix(lower, "example_") {
-      base = input[len("example_"):]
-    }
-    underscored, _ := strings.replace_all(base, "-", "_", context.temp_allocator)
-    normalized := strings.to_upper(underscored, context.temp_allocator)
-    return strings.concatenate({"EXAMPLE_", normalized})
-  }
-
-  normalize_test_macro :: proc(input: string) -> string {
-    lower := strings.to_lower(input, context.temp_allocator)
-    // If it's a plain number, just wrap it
-    if _, ok := strconv.parse_int(input); ok {
-      return strings.concatenate({"TEST_", input})
-    }
-    base := input
-    if strings.has_prefix(lower, "test_") {
-      base = input[len("test_"):]
-    }
-    underscored, _ := strings.replace_all(base, "-", "_", context.temp_allocator)
-    normalized := strings.to_upper(underscored, context.temp_allocator)
-    return strings.concatenate({"TEST_", normalized})
-  }
-
-  collect_examples :: proc() -> (macros: [dynamic]string, file_map: map[string]string) {
-    examples_dir, _ := os.join_path({REPO_ROOT, "Core", "Src", "Examples"}, context.temp_allocator)
-    pattern, _ := os.join_path({examples_dir, "*.cpp"}, context.temp_allocator)
-    files, err := os.glob(pattern, context.temp_allocator)
-    if err != nil {
-      return
-    }
-
-    macro_pattern := `EXAMPLE_[A-Z0-9_]+`
-    file_map = make(map[string]string, context.allocator)
-
-    for file in files {
-      data, read_err := os.read_entire_file(file, context.temp_allocator)
-      if read_err != nil {
-        continue
-      }
-      text := string(data)
-
-      it, iter_err := regex.create_iterator(text, macro_pattern, {})
-      if iter_err != nil {
-        fmt.eprintfln("Could not create iterator for %s: %v", file, iter_err)
-        continue
-      }
-      defer regex.destroy_iterator(it)
-
-      for {
-        cap, _, ok := regex.match_iterator(&it)
-        if !ok {
-          break
-        }
-        macro := cap.groups[0]
-        if _, exists := file_map[macro]; !exists {
-          file_map[macro] = file
-          append(&macros, macro)
-        }
-        regex.destroy_capture(cap)
-      }
-    }
-    return
-  }
-
-  find_example_file :: proc(example_macro: string) -> (file_path: string, ok: bool) {
-    macros, file_map := collect_examples()
-    defer delete(macros)
-    defer delete(file_map)
-    path, exists := file_map[example_macro]
-    return path, exists
-  }
-
-  collect_tests_for_file :: proc(file_path: string) -> [dynamic]string {
-    if file_path == "" {
-      return {}
-    }
-    data, read_err := os.read_entire_file(file_path, context.temp_allocator)
-    if read_err != nil {
-      return {}
-    }
-    text := string(data)
-    test_pattern := `TEST_[A-Z0-9_]+`
-
-    tests := make([dynamic]string, context.allocator)
-    seen := make(map[string]bool, context.allocator)
-
-    it, err := regex.create_iterator(text, test_pattern, {})
-    if err != nil {
-      fmt.eprintfln("Could not create iterator for %s: %v", file_path, err)
-      return tests
-    }
-    defer regex.destroy_iterator(it)
-
-    for {
-      cap, _, ok := regex.match_iterator(&it)
-      if !ok {
-        break
-      }
-      test_macro := cap.groups[0]
-      if !seen[test_macro] {
-        seen[test_macro] = true
-        append(&tests, test_macro)
-      }
-      regex.destroy_capture(cap)
-    }
-    return tests
-  }
-
-  // start function
   example_macro: string
   if example == "" {
     example_macro = "MAIN"
@@ -1674,6 +1835,24 @@ run_build_example :: proc(example, test: string, no_test: bool, preset, board_na
 
   print_note("build completed", .Ok)
   return true
+}
+
+run_build_example :: proc(example, test: string, no_test: bool, preset, board_name: string, extra_cxx_flags: []string, jobs: int, use_script := false, use_cmake := true) -> bool
+{
+  preset := preset
+  if preset == "" {
+    preset = DEFAULT_PRESET
+  }
+  if use_script {
+    return run_build_example_script(example, test, no_test, preset, board_name, extra_cxx_flags, jobs)
+  }
+  if use_cmake {
+    return run_build_example_cmake(example, test, no_test, preset, board_name, extra_cxx_flags, jobs)
+  }
+
+  // TODO: Don't use cmake...
+  print_note("Unimplemented", .Wrong)
+  return false
 }
 
 resolve_flash_method :: proc(req: cmdline.Hyper_FlashMethod) -> cmdline.Hyper_FlashMethod
