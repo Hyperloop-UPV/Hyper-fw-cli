@@ -15,9 +15,10 @@ import "core:strings"
 import "core:strconv"
 import "core:reflect"
 import "core:terminal"
-import "core:terminal/ansi"
 import "core:text/regex"
-import utf8 "core:unicode/utf8"
+import "core:unicode/utf8"
+import "core:encoding/json"
+import "core:terminal/ansi"
 
 import platform "hyper-platform"
 import cmdline "hyper-cmdline"
@@ -1850,7 +1851,136 @@ run_build_example :: proc(example, test: string, no_test: bool, preset, board_na
     return run_build_example_cmake(example, test, no_test, preset, board_name, extra_cxx_flags, jobs)
   }
 
-  // TODO: Don't use cmake...
+  /* NOTE: CmakePresets kept for backwards compatibility */
+  CmakePresets :: struct {
+    version: int,
+    configurePresets: []struct {
+      name: string,
+      hidden: bool,
+      displayName: string,
+      inherits: []string,
+      generator: string,
+      binaryDir: string,
+      toolchainFile: string,
+      installDir: string,
+      cacheVariables: map[string]string,
+    },
+
+    buildPresets: []struct {
+      name: string,
+      configurePreset: string,
+    },
+
+    testPresets: []struct {
+      name: string,
+      configurePreset: string,
+      inherits: string,
+      output: struct {
+        outputOnFailure: bool,
+      },
+      execution: struct {
+        noTestsAction: string,
+      },
+      filter: struct {
+        include: struct {
+          name: string,
+        },
+      },
+    },
+  }
+
+  if os.exists("CMakePresets.json") {
+    data, err := os.read_entire_file("CMakePresets.json", context.temp_allocator)
+    if err != nil {
+      fmt.eprintfln("Could not read CMakePresets.json: %v", err)
+      return false
+    }
+
+    cmakePresets: CmakePresets
+    unmarshal_err := json.unmarshal(data, &cmakePresets, allocator = context.temp_allocator)
+    if unmarshal_err != nil {
+      fmt.eprintfln("Could not unmarshall CMakePresets.json: %v", unmarshal_err)
+      return false
+    }
+
+    configureIdx := -1
+    for p, idx in cmakePresets.configurePresets {
+      if p.name == preset && !p.hidden {
+        configureIdx = idx
+      }
+    }
+
+    if configureIdx == -1 {
+      fmt.eprintfln("Could not find preset %s in configurePresets in CMakePresets.json", preset)
+      return false
+    }
+
+    debugInfo := false
+    optimizedRelease := false
+    for inherited in cmakePresets.configurePresets[configureIdx].inherits {
+      idx := -1
+      for p, i in cmakePresets.configurePresets {
+        if p.name == inherited {
+          idx = i
+        }
+      }
+
+      if idx == -1 {
+        fmt.eprintfln("Unknown preset %s in %s's inherited presets", inherited, preset)
+        return false
+      }
+
+      if "CMAKE_BUILD_TYPE" in cmakePresets.configurePresets[idx].cacheVariables {
+        type := cmakePresets.configurePresets[idx].cacheVariables["CMAKE_BUILD_TYPE"]
+        if type == "Debug" {
+          debugInfo = true
+          optimizedRelease = false
+        } else if type == "Release" {
+          debugInfo = false
+          optimizedRelease = true
+        } else if type == "RelWithDebInfo" {
+          debugInfo = true
+          optimizedRelease = true
+        }
+      }
+    }
+
+    cache := cmakePresets.configurePresets[configureIdx].cacheVariables
+
+    if "CMAKE_BUILD_TYPE" in cache {
+      type := cache["CMAKE_BUILD_TYPE"]
+      if type == "Debug" {
+        debugInfo = true
+        optimizedRelease = false
+      } else if type == "Release" {
+        debugInfo = false
+        optimizedRelease = true
+      } else if type == "RelWithDebInfo" {
+        debugInfo = true
+        optimizedRelease = true
+      }
+    }
+
+    targetBoardOrNucleo := "NUCLEO"
+    if "TARGET_NUCLEO" in cache {
+      targetBoardOrNucleo = "NUCLEO" if cache["TARGET_NUCLEO"] == "ON" else "BOARD"
+    }
+
+    useEthernet := cache["USE_ETHERNET"] == "ON"
+    sanitize := cache["STLIB_ENABLE_SANITIZERS"] == "ON"
+
+    phy := ""
+    if "PHY_TYPE" in cache {
+      phy = cache["PHY_TYPE"]
+    } else if useEthernet {
+      fmt.eprintfln("ERROR: PHY_TYPE not in cmake preset %s but USE_ETHERNET is ON", preset)
+      return false
+    }
+
+    // TODO: build...
+    fmt.println(targetBoardOrNucleo, sanitize)
+  }
+
   print_note("Unimplemented", .Wrong)
   return false
 }
