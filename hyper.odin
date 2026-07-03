@@ -1526,12 +1526,12 @@ Hyper_Compile_Ctx :: struct {
 
 get_filepath_from_compile_ctx :: proc(ctx: Hyper_Compile_Ctx) -> string
 {
-  output := fmt.tprintf("%s/%s", ctx.outputDirectory, ctx.output)
-  if output == "" && (ctx.type != .Object) {
+  if ctx.output == "" && (ctx.type != .Object) {
     fmt.eprintln("Output path must be specified unless compiling for object file")
-    return output
+    return ctx.output
   }
-
+  
+  output := fmt.tprintf("%s/%s", ctx.outputDirectory, ctx.output)
   if ctx.outputExtension != "" {
     return fmt.tprintf("%s%s", output, ctx.outputExtension)
   }
@@ -1543,7 +1543,7 @@ get_filepath_from_compile_ctx :: proc(ctx: Hyper_Compile_Ctx) -> string
   }
 
   if ctx.type == .Object {
-    if output != "" {
+    if ctx.output != "" {
       return fmt.tprintf("%s.o", output)
     }
   } else if ctx.type == .DynamicLibrary {
@@ -1578,29 +1578,25 @@ needs_rebuild :: proc(out: string, input_paths: []string) -> int
   return 0
 }
 
-needs_c_rebuild :: proc(ctx: Hyper_Compile_Ctx) -> int
+/* assumes at least the compiler has been included in cmd at the start */
+needs_c_rebuild_cmd :: proc(cmd: ^[dynamic]string, output: string, sourceFiles: []string) -> int
 {
-  cmd := make([dynamic]string, context.temp_allocator)
-  append(&cmd, ctx.cc, "-MM")
-
-  output := get_filepath_from_compile_ctx(ctx)
-
-  needsRebuildSimple := needs_rebuild(output, ctx.sourceFiles)
+  needsRebuildSimple := needs_rebuild(output, sourceFiles)
   if needsRebuildSimple != 0 {
     return needsRebuildSimple
   }
 
-  append(&cmd, ..ctx.sourceFiles[:])
-  for path in ctx.includePaths {
-    append(&cmd, "-I", path)
-  }
+  mark := len(cmd)
+  defer resize(cmd, mark)
+  append(cmd, "-MM")
+  append(cmd, ..sourceFiles[:])
 
   desc := os.Process_Desc {
     command = cmd[:],
   }
   state, stdout, _, err := os.process_exec(desc, context.temp_allocator)
   if state.exit_code != 0 || err != nil {
-    fmt.eprintfln("Failed to check if %s needs rebuild", ctx.output)
+    fmt.eprintfln("Failed to check if %s needs rebuild", output)
     return -1
   }
 
@@ -1633,7 +1629,7 @@ needs_c_rebuild :: proc(ctx: Hyper_Compile_Ctx) -> int
     }
   }
 
-  outTime, time_err := os.modification_time_by_path(ctx.output)
+  outTime, time_err := os.modification_time_by_path(output)
   if time_err != nil {
     return 1
   }
@@ -1651,6 +1647,102 @@ needs_c_rebuild :: proc(ctx: Hyper_Compile_Ctx) -> int
   }
 
   return 0
+}
+
+needs_c_rebuild :: proc(ctx: Hyper_Compile_Ctx) -> int
+{
+  cmd := make([dynamic]string, context.temp_allocator)
+  append(&cmd, "gcc", "-MM")
+
+  output := get_filepath_from_compile_ctx(ctx)
+
+  for path in ctx.includePaths {
+    append(&cmd, "-I", path)
+  }
+
+  return needs_c_rebuild_cmd(&cmd, output, ctx.sourceFiles)
+}
+
+compile_c_context :: proc(ctx: Hyper_Compile_Ctx, parallel := false) -> (os.Process, bool)
+{
+  ctx := ctx
+  cmd := make([dynamic]string, context.temp_allocator)
+  if ctx.outputDirectory == "" {
+    ctx.outputDirectory = "."
+  }
+  output := get_filepath_from_compile_ctx(ctx)
+  append(&cmd, ctx.cc)
+
+  // compile only, don't link
+  if ctx.type == .StaticLibrary || ctx.type == .Object {
+    append(&cmd, "-c")
+  }
+  append(&cmd, ..ctx.sourceFiles[:])
+  if output != "" {
+    append(&cmd, "-o", ctx.output)
+  }
+
+  if ctx.optimize == .Speed {
+    append(&cmd, "-O3")
+  } else if ctx.optimize == .Size {
+    append(&cmd, "-Os")
+  }
+
+  if ctx.debug { append(&cmd, "-g") }
+  if ctx.warnings { append(&cmd, "-Wall", "-Wextra") }
+  if ctx.warningsAsErrors { append(&cmd, "-Werror") }
+  for inc in ctx.includePaths {
+    append(&cmd, "-I", inc)
+  }
+
+  append(&cmd, ..ctx.extraCompilerFlags[:])
+
+  for libPath in ctx.libPaths {
+    append(&cmd, "-L", libPath)
+  }
+  for lib in ctx.libs {
+    append(&cmd, "-l", lib)
+  }
+
+  if ctx.type == .DynamicLibrary {
+    append(&cmd, "-shared")
+  }
+  if ctx.gcSections {
+    append(&cmd, "-Wl,--gc-sections")
+  }
+
+  desc := os.Process_Desc {
+    command = cmd[:],
+  }
+  process, err := os.process_start(desc)
+  if err != nil {
+    fmt.eprintfln("Could not run process %v: %v", cmd[:], err)
+    return os.Process{}, false
+  }
+
+  if parallel {
+    return process, true
+  } else {
+    state: os.Process_State
+    state, err = os.process_wait(process)
+    if err != nil {
+      fmt.eprintfln("Could not wait for process %v: %v", cmd[:], err)
+      return os.Process{}, false
+    }
+    return os.Process{}, state.exit_code == 0
+  }
+}
+
+wait_all_processes :: proc(processes: []os.Process) -> bool
+{
+  ok := true
+  for p in processes {
+    state, err := os.process_wait(p)
+    if err != nil || state.exit_code != 0 {
+      ok = false
+    }
+  }
+  return ok
 }
 
 run_build_example_script :: proc(example, test: string, no_test: bool, preset, board_name: string, extra_cxx_flags: []string, jobs: int) -> bool
@@ -1851,138 +1943,412 @@ run_build_example :: proc(example, test: string, no_test: bool, preset, board_na
     return run_build_example_cmake(example, test, no_test, preset, board_name, extra_cxx_flags, jobs)
   }
 
-  /* NOTE: CmakePresets kept for backwards compatibility */
-  CmakePresets :: struct {
-    version: int,
-    configurePresets: []struct {
+  ord_number :: proc(n: int) -> string
+  {
+    switch n {
+      case 0: return "1st"
+      case 1: return "2nd"
+      case 2: return "3rd"
+      case: return fmt.tprintf("%dth", n)
+    }
+  }
+
+  /* Replaces any ${VARIABLE} in format if it is in vars and return false if it doesn't exist */
+  format_variable :: proc(vars: map[string]string, format: string, what: string) -> (result: string, ok: bool)
+  {
+    builder := strings.builder_make(context.temp_allocator)
+    pos := 0
+    ok = true
+
+    for pos < len(format) {
+      start_offset := strings.index(format[pos:], "${")
+      if start_offset == -1 {
+        // no more variables to format
+        strings.write_string(&builder, format[pos:])
+        break
+      }
+
+      // Copy everything before the format
+      strings.write_string(&builder, format[pos:pos + start_offset])
+
+      format_start := pos + start_offset
+      // Find the closing '}' after "${"
+      close_offset := strings.index(format[format_start + 2:], "}")
+      if close_offset == -1 {
+        // Malformed format (no closing '}')
+        print_note(fmt.tprintf("Missing closing '}' in '%s' in %s", format, what), .Wrong)
+        strings.write_string(&builder, format[format_start:])
+        ok = false
+        pos = len(format)
+        break
+      }
+
+      close_abs := format_start + 2 + close_offset
+      name := format[format_start + 2 : close_abs]
+
+      if val, exists := vars[name]; exists {
+        strings.write_string(&builder, val)
+      } else {
+        // Variable not found
+        print_note(fmt.tprintf("Missing variable '%s' in '%s' ", format, what), .Wrong)
+        strings.write_string(&builder, format[format_start:close_abs + 1])
+        ok = false
+      }
+
+      // continue after '}'
+      pos = close_abs + 1
+    }
+
+    result = strings.to_string(builder)
+    return
+  }
+
+  error_from_stderr_handle :: proc(cmd: []string, handle: ^os.File, exit_code: int)
+  {
+    data, err := os.read_entire_file_from_file(handle, context.temp_allocator)
+    if err != nil {
+      fmt.eprintfln("Failed to read stderr from %v: %v", cmd, err)
+      fmt.eprintfln("Exited with code %d", exit_code)
+    } else {
+      fmt.eprintfln("Error in %v", cmd)
+      fmt.eprint(string(data))
+      fmt.eprintfln("Exited with code %d", exit_code)
+    }
+  }
+
+  /* structure for "hyper-build.json" scripts */
+  Hyper_BuildConfig :: struct {
+    presets: []struct {
       name: string,
       hidden: bool,
       displayName: string,
-      inherits: []string,
-      generator: string,
       binaryDir: string,
-      toolchainFile: string,
-      installDir: string,
-      cacheVariables: map[string]string,
+      toolchainPrefix: string,
+      targetType: string,
+      inherits: []string,
+      targetMode: string,
+      defines: map[string]string,
     },
 
-    buildPresets: []struct {
-      name: string,
-      configurePreset: string,
-    },
+    variables: map[string]string,
 
-    testPresets: []struct {
+    buildInfo: []struct {
       name: string,
-      configurePreset: string,
-      inherits: string,
-      output: struct {
-        outputOnFailure: bool,
-      },
-      execution: struct {
-        noTestsAction: string,
-      },
-      filter: struct {
-        include: struct {
-          name: string,
-        },
-      },
+      /* this field is called 'when' in json but it's a keyword in odin */
+      cond: struct {
+        variable: string,
+        op: string,
+        value: string,
+      } `json:"when"`,
+      /* extra C compiler flags */
+      compilerFlags: []string,
+      linkerFlags: []string,
+      /* These will be added as "-D" <define>. So you may do:
+       * "cDefines": [ "DEFINITION=VALUE" ] and it will also work
+       */
+      cDefines: []string,
+      includePaths: []string,
+      sources: []string,
     },
   }
 
-  if os.exists("CMakePresets.json") {
-    data, err := os.read_entire_file("CMakePresets.json", context.temp_allocator)
+  if os.exists("hyper-build.json") {
+    data, err := os.read_entire_file("hyper-build.json", context.temp_allocator)
     if err != nil {
-      fmt.eprintfln("Could not read CMakePresets.json: %v", err)
+      fmt.eprintfln("Could not read hyper-build.json: %v", err)
       return false
     }
 
-    cmakePresets: CmakePresets
-    unmarshal_err := json.unmarshal(data, &cmakePresets, allocator = context.temp_allocator)
+    buildCfg: Hyper_BuildConfig
+    // TODO: More manual parse of json instead of json.unmarshal? (for better error messages)
+    unmarshal_err := json.unmarshal(data, &buildCfg, allocator = context.temp_allocator)
     if unmarshal_err != nil {
-      fmt.eprintfln("Could not unmarshall CMakePresets.json: %v", unmarshal_err)
+      fmt.eprintfln("Could not unmarshall hyper-build.json: %v", unmarshal_err)
       return false
     }
 
+    // step 1: handle preset
     configureIdx := -1
-    for p, idx in cmakePresets.configurePresets {
-      if p.name == preset && !p.hidden {
-        configureIdx = idx
-      }
+    for p, idx in buildCfg.presets {
+      if p.name == preset && !p.hidden { configureIdx = idx; break }
     }
 
     if configureIdx == -1 {
-      fmt.eprintfln("Could not find preset %s in configurePresets in CMakePresets.json", preset)
+      fmt.eprintfln("Could not find preset %s in presets in hyper-build.json", preset)
       return false
     }
 
-    debugInfo := false
-    optimizedRelease := false
-    for inherited in cmakePresets.configurePresets[configureIdx].inherits {
+    binaryDir := "out/build/${presetName}"
+    toolchainPrefix := ""
+    targetType := ""
+    targetMode := "Debug"
+    presetDefines := make(map[string]string, context.temp_allocator)
+
+    // TODO: Guard circular dependencies in preset inherits
+    inheritStack := make([dynamic]string, context.temp_allocator)
+    append(&inheritStack, ..buildCfg.presets[configureIdx].inherits[:])
+    for len(inheritStack) > 0 {
+      inherit := inheritStack[0]
+      ordered_remove(&inheritStack, 0)
+
       idx := -1
-      for p, i in cmakePresets.configurePresets {
-        if p.name == inherited {
-          idx = i
-        }
+      for p, i in buildCfg.presets {
+        if p.name == inherit { idx = i; break }
       }
 
       if idx == -1 {
-        fmt.eprintfln("Unknown preset %s in %s's inherited presets", inherited, preset)
+        fmt.eprintfln("Unknown preset %s in %s's inherited presets", inherit, preset)
         return false
       }
 
-      if "CMAKE_BUILD_TYPE" in cmakePresets.configurePresets[idx].cacheVariables {
-        type := cmakePresets.configurePresets[idx].cacheVariables["CMAKE_BUILD_TYPE"]
-        if type == "Debug" {
-          debugInfo = true
-          optimizedRelease = false
-        } else if type == "Release" {
-          debugInfo = false
-          optimizedRelease = true
-        } else if type == "RelWithDebInfo" {
-          debugInfo = true
-          optimizedRelease = true
+      if buildCfg.presets[idx].binaryDir != "" {
+        binaryDir = buildCfg.presets[idx].binaryDir
+      }
+      if buildCfg.presets[idx].toolchainPrefix != "" {
+        toolchainPrefix = buildCfg.presets[idx].toolchainPrefix
+      }
+      if buildCfg.presets[idx].targetType != "" {
+        targetType = buildCfg.presets[idx].targetType
+      }
+      if buildCfg.presets[idx].targetMode != "" {
+        targetMode = buildCfg.presets[idx].targetMode
+      }
+      // Ignore the possibility of overwriting a define.
+      // I don't really care if this map gets a little larger than it should be
+      reserve(&presetDefines, len(presetDefines) + len(buildCfg.presets[idx].defines))
+      for key, val in buildCfg.presets[idx].defines {
+        presetDefines[key] = val
+      }
+
+      if len(buildCfg.presets[idx].inherits) > 0 {
+        append(&inheritStack, ..buildCfg.presets[idx].inherits[:])
+      }
+    }
+
+    if buildCfg.presets[configureIdx].binaryDir != "" {
+      binaryDir = buildCfg.presets[configureIdx].binaryDir
+    }
+    if buildCfg.presets[configureIdx].toolchainPrefix != "" {
+      toolchainPrefix = buildCfg.presets[configureIdx].toolchainPrefix
+    }
+    if buildCfg.presets[configureIdx].targetType != "" {
+      targetType = buildCfg.presets[configureIdx].targetType
+    }
+    if buildCfg.presets[configureIdx].targetMode != "" {
+      targetMode = buildCfg.presets[configureIdx].targetMode
+    }
+    reserve(&presetDefines, len(presetDefines) + len(buildCfg.presets[configureIdx].defines))
+    for key, val in buildCfg.presets[configureIdx].defines {
+      presetDefines[key] = val
+    }
+
+    presetMap := make(map[string]string, context.temp_allocator)
+    presetMap["presetName"] = preset
+    bin_ok: bool
+    binaryDir, bin_ok = format_variable(presetMap, binaryDir, "Binary Directory")
+    if !bin_ok {
+      return false
+    }
+
+    reserve(&presetDefines, len(presetDefines) + len(buildCfg.variables))
+    for key, val in buildCfg.variables {
+      presetDefines[key] = val
+    }
+
+    // step 2: gather buildInfo
+    // cDefines field will be included here since it just means more flags
+    // includePaths will also be included here since it just means more flags
+    compilerFlags := make([dynamic]string, context.temp_allocator)
+    linkerFlags := make([dynamic]string, context.temp_allocator)
+    sources := make([dynamic]string, context.temp_allocator)
+    infoloop: for info, infoIdx in buildCfg.buildInfo {
+      if info.cond.variable != "" {
+        switch info.cond.op {
+          case "": {
+            fmt.eprintfln("Missing 'op' field in %s buildInfo 'when' field", 
+              info.name if info.name != "" else ord_number(infoIdx))
+            return false
+          }
+
+          case "equal": {
+            val := presetDefines[info.cond.variable]
+            if val != info.cond.value {
+              continue infoloop
+            }
+          }
+
+          case "not equal": {
+            val := presetDefines[info.cond.variable]
+            if val == info.cond.value {
+              continue infoloop
+            }
+          }
+        }
+      }
+
+      append(&compilerFlags, ..info.compilerFlags[:])
+      append(&linkerFlags, ..info.linkerFlags[:])
+      for def in info.cDefines {
+        append(&compilerFlags, "-D", def)
+      }
+
+      for inc in info.includePaths {
+        var, ok := format_variable(presetDefines, inc, "include paths")
+        if !ok { return false }
+        append(&compilerFlags, "-I", var)
+      }
+
+      for src in info.sources {
+        var, ok := format_variable(presetDefines, src, "source files")
+        if !ok { return false }
+        append(&sources, var)
+      }
+    }
+
+    // step 3: Compile!
+    cmd := make([dynamic]string, context.temp_allocator)
+    append(&cmd, fmt.tprintf("{:s}gcc", toolchainPrefix))
+    append(&cmd, "-c")
+    append(&cmd, ..compilerFlags[:])
+    if targetMode == "Debug" {
+      append(&cmd, "-g")
+    } else if targetMode == "Release" {
+      append(&cmd, "-O3")
+    } else if targetMode == "RelWithDebInfo" {
+      append(&cmd, "-g", "-O3")
+    }
+
+    parallel := false
+    ok := true
+
+    parallel_max := os.get_processor_core_count()
+
+    RunningProcess :: struct {
+      handle: os.Process,
+      stderr_r: ^os.File,
+      cmd: []string,
+    }
+    processes := make([dynamic]RunningProcess, context.temp_allocator)
+    outputFiles := make([dynamic]string, context.temp_allocator)
+    for src in sources {
+      output := fmt.tprintf("%s/%s.o", binaryDir, src)
+      os.make_directory_all(os.dir(output))
+      append(&outputFiles, output)
+
+      if needs_c_rebuild_cmd(&cmd, output, []string{src}) != 0 {
+        mark := len(cmd)
+        defer resize(&cmd, mark)
+
+        append(&cmd, src, "-o", output)
+
+        stderr_r, stderr_w: ^os.File
+        stderr_r, stderr_w, err = os.pipe()
+        if err != nil {
+          fmt.printfln("Could not create pipe for process %v: %v", cmd[:], err)
+          ok = false
+          continue
+        }
+
+        process: os.Process
+        desc := os.Process_Desc {
+          command = cmd[:],
+          stderr = stderr_w,
+        }
+        process, err = os.process_start(desc)
+        if err != nil {
+          fmt.eprintfln("Could not run process %v: %v", cmd[:], err)
+          os.close(stderr_r)
+          os.close(stderr_w)
+          ok = false
+          continue
+        }
+        fmt.printfln("[INFO] compiling %s", src)
+        os.close(stderr_w)
+
+        if parallel {
+          if len(processes) >= parallel_max {
+            for pIdx := 0; pIdx < len(processes); {
+              state: os.Process_State
+              state, err = os.process_wait(processes[pIdx].handle, 0)
+              if state.exited {
+                os.close(processes[pIdx].stderr_r)
+                unordered_remove(&processes, pIdx)
+                if state.exit_code != 0 {
+                  error_from_stderr_handle(processes[pIdx].cmd, processes[pIdx].stderr_r, state.exit_code)
+                  ok = false
+                }
+                continue
+              }
+              pIdx += 1
+            }
+
+            if len(processes) >= parallel_max {
+              state: os.Process_State
+              state, err = os.process_wait(processes[0].handle, 0)
+              if err != nil {
+                fmt.eprintfln("Failed to wait for %v", processes[0].cmd)
+                ok = false
+              } else if state.exit_code != 0 {
+                error_from_stderr_handle(processes[0].cmd, processes[0].stderr_r, state.exit_code)
+                ok = false
+              }
+              os.close(processes[0].stderr_r)
+              unordered_remove(&processes, 0)
+            }
+          }
+
+          p := RunningProcess {
+            handle = process,
+            stderr_r = stderr_r,
+            cmd = slice.clone(cmd[:], context.temp_allocator),
+          }
+          append(&processes, p)
+        } else {
+          state: os.Process_State
+          state, err = os.process_wait(process)
+          if err != nil {
+            fmt.eprintfln("Could not wait for process %v: %v", cmd[:], err)
+            ok = false
+          } else if state.exit_code != 0 {
+            error_from_stderr_handle(cmd[:], stderr_r, state.exit_code)
+            ok = false
+          }
+          os.close(stderr_r)
         }
       }
     }
 
-    cache := cmakePresets.configurePresets[configureIdx].cacheVariables
+    clear(&cmd)
+    append(&cmd, fmt.tprintf("{:s}ld", toolchainPrefix))
+    append(&cmd, "-o", "out/build/latest.elf")
+    append(&cmd, ..outputFiles[:])
+    append(&cmd, ..linkerFlags[:])
 
-    if "CMAKE_BUILD_TYPE" in cache {
-      type := cache["CMAKE_BUILD_TYPE"]
-      if type == "Debug" {
-        debugInfo = true
-        optimizedRelease = false
-      } else if type == "Release" {
-        debugInfo = false
-        optimizedRelease = true
-      } else if type == "RelWithDebInfo" {
-        debugInfo = true
-        optimizedRelease = true
+    for pIdx := 0; pIdx < len(processes); pIdx += 1 {
+      state: os.Process_State
+      state, err = os.process_wait(processes[pIdx].handle)
+      os.close(processes[pIdx].stderr_r)
+      if state.exit_code != 0 {
+        error_from_stderr_handle(processes[pIdx].cmd, processes[pIdx].stderr_r, state.exit_code)
+        ok = false
       }
     }
 
-    targetBoardOrNucleo := "NUCLEO"
-    if "TARGET_NUCLEO" in cache {
-      targetBoardOrNucleo = "NUCLEO" if cache["TARGET_NUCLEO"] == "ON" else "BOARD"
+    if ok {
+      // link
+      ok = run_command(cmd[:]).exit_code == 0
     }
 
-    useEthernet := cache["USE_ETHERNET"] == "ON"
-    sanitize := cache["STLIB_ENABLE_SANITIZERS"] == "ON"
-
-    phy := ""
-    if "PHY_TYPE" in cache {
-      phy = cache["PHY_TYPE"]
-    } else if useEthernet {
-      fmt.eprintfln("ERROR: PHY_TYPE not in cmake preset %s but USE_ETHERNET is ON", preset)
-      return false
+    if ok {
+      print_note("Build success", .Ok)
+    } else {
+      print_note("Build fail", .Wrong)
     }
-
-    // TODO: build...
-    fmt.println(targetBoardOrNucleo, sanitize)
+    return ok
+  } else {
+    fmt.eprintln("Missing 'hyper-build.json")
+    return false
   }
-
-  print_note("Unimplemented", .Wrong)
-  return false
 }
 
 resolve_flash_method :: proc(req: cmdline.Hyper_FlashMethod) -> cmdline.Hyper_FlashMethod
@@ -2523,6 +2889,7 @@ command_run :: proc(run: ^cmdline.Hyper_RunCommand) -> bool
     extra_cxx_flags = run.overflow[:] if run.extra_cxx_flags != "" else nil,
     jobs = run.jobs,
     use_script = run.use_script,
+    use_cmake = !run.dont_use_cmake,
   )
   if !build_ok {
     fmt.eprintfln("Failed to build")
@@ -2680,6 +3047,7 @@ main :: proc()
         extra_cxx_flags = opts.build.overflow[:] if opts.build.extra_cxx_flags != "" else nil,
         jobs = opts.build.jobs,
         use_script = opts.build.use_script,
+        use_cmake = !opts.build.dont_use_cmake,
       )
     }
 

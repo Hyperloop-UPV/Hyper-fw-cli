@@ -64,6 +64,8 @@ Hyper_BuildCommand :: struct {
   board_name: string `usage:"Override BOARD_NAME for code generation"`,
   jobs: int `usage:"Set CMAKE_BUILD_PARALLEL_LEVEL"`,
   use_script: bool `usage:"use BUILD_EXAMPLE_SCRIPT instead of a procedure to build"`,
+  dont_use_cmake: bool `usage:"Use 'hyper-build.json' to build instead of cmake files"`,
+
   extra_cxx_flags: string `usage:"Extra c++ flags appended after the injected defines, this should be the last flag to be able to use more than one."`,
   overflow: [dynamic]string `usage:"Any extra arguments go here. Used for extra-cxx-flags"`,
 }
@@ -84,6 +86,7 @@ Hyper_RunCommand :: struct {
   board_name: string `usage:"Override BOARD_NAME for code generation"`,
   jobs: int `usage:"Set CMAKE_BUILD_PARALLEL_LEVEL"`,
   use_script: bool `usage:"use BUILD_EXAMPLE_SCRIPT instead of a procedure to build"`,
+  dont_use_cmake: bool `usage:"Use 'hyper-build.json' to build instead of cmake files"`,
 
   // flash
   elf: string `usage:"Elf image to flash. LATEST_ELF is default"`,
