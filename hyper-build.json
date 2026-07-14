@@ -1,0 +1,599 @@
+{
+  "presets": [
+    {
+      "name": "mcu",
+      "hidden": true,
+      "binaryDir": "out/build/${presetName}",
+      "toolchainPrefix": "arm-none-eabi-",
+      "targetType": "STATIC_LIBRARY"
+    },
+    {
+      "name": "sim",
+      "hidden": true,
+      "binaryDir": "out/build/${presetName}",
+      "defines": {
+        "SIM_ON": "1"
+      }
+    },
+
+    {
+      "name": "hal-ethernet",
+      "hidden": true,
+      "inherits": [
+        "mcu"
+      ],
+      "defines": {
+        "HAL_ETHERNET": "1"
+      }
+    },
+
+    {
+      "name": "nucleo-x",
+      "hidden": true,
+      "inherits": [
+        "mcu"
+      ],
+      "defines": {
+        "NUCLEO": "1"
+      }
+    },
+    {
+      "name": "nucleo-x-eth",
+      "hidden": true,
+      "inherits": [
+        "hal-ethernet"
+      ],
+      "defines": {
+        "NUCLEO": "1",
+        "PHY_TYPE": "LAN8742"
+      }
+    },
+
+    {
+      "name": "nucleo-debug",
+      "displayName": "Nucleo [DBG]",
+      "inherits": [
+        "nucleo-x"
+      ],
+      "targetMode": "Debug"
+    },
+    {
+      "name": "nucleo-release",
+      "displayName": "Nucleo [REL]",
+      "inherits": [
+        "nucleo-x"
+      ],
+      "targetMode": "Release"
+    },
+    {
+      "name": "nucleo-relwithdebinfo",
+      "displayName": "Nucleo [RWD]",
+      "inherits": [
+        "nucleo-x"
+      ],
+      "targetMode": "RelWithDebInfo"
+    },
+    {
+      "name": "nucleo-debug-eth",
+      "displayName": "Nucleo [DBG] [ETH]",
+      "inherits": [
+        "nucleo-x-eth"
+      ],
+      "targetMode": "Debug"
+    },
+    {
+      "name": "nucleo-release",
+      "displayName": "Nucleo [REL] [ETH]",
+      "inherits": [
+        "nucleo-x-eth"
+      ],
+      "targetMode": "Release"
+    },
+    {
+      "name": "nucleo-relwithdebinfo",
+      "displayName": "Nucleo [RWD] [ETH]",
+      "inherits": [
+        "nucleo-x-eth"
+      ],
+      "targetMode": "RelWithDebInfo"
+    },
+
+    {
+      "name": "board-debug",
+      "displayName": "Board [DBG]",
+      "inherits": [
+        "mcu"
+      ],
+      "targetMode": "Debug"
+    },
+    {
+      "name": "board-release",
+      "displayName": "Board [REL]",
+      "inherits": [
+        "mcu"
+      ],
+      "targetMode": "Release"
+    },
+    {
+      "name": "board-relwithdebinfo",
+      "displayName": "Board [RWD]",
+      "inherits": [
+        "mcu"
+      ],
+      "targetMode": "RelWithDebInfo"
+    },
+    {
+      "name": "board-debug-eth-ksz8041",
+      "displayName": "Board [DBG] [ETH] [KSZ8041]",
+      "inherits": [
+        "hal-ethernet"
+      ],
+      "targetMode": "Debug",
+      "defines": {
+        "STLIB_ETH": "1",
+        "PHY_TYPE": "KSZ8041"
+      }
+    },
+    {
+      "name": "board-debug-eth-lan8700",
+      "displayName": "Board [DBG] [ETH] [LAN8700]",
+      "inherits": [
+        "hal-ethernet"
+      ],
+      "targetMode": "Debug",
+      "defines": {
+        "STLIB_ETH": "1",
+        "PHY_TYPE": "LAN8700"
+      }
+    },
+    {
+      "name": "board-release-eth-ksz8041",
+      "displayName": "Board [REL] [ETH] [KSZ8041]",
+      "inherits": [
+        "hal-ethernet"
+      ],
+      "targetMode": "Release",
+      "defines": {
+        "STLIB_ETH": "1",
+        "PHY_TYPE": "KSZ8041"
+      }
+    },
+    {
+      "name": "board-release-eth-lan8700",
+      "displayName": "Board [REL] [ETH] [LAN8700]",
+      "inherits": [
+        "hal-ethernet"
+      ],
+      "targetMode": "Release",
+      "defines": {
+        "STLIB_ETH": "1",
+        "PHY_TYPE": "LAN8700"
+      }
+    },
+    {
+      "name": "board-relwithdebinfo-eth-ksz8041",
+      "displayName": "Board [RWD] [ETH] [KSZ8041]",
+      "inherits": [
+        "hal-ethernet"
+      ],
+      "targetMode": "RelWithDebInfo",
+      "defines": {
+        "STLIB_ETH": "1",
+        "PHY_TYPE": "KSZ8041"
+      }
+    },
+    {
+      "name": "board-relwithdebinfo-eth-lan8700",
+      "displayName": "Board [RWD] [ETH] [LAN8700]",
+      "inherits": [
+        "hal-ethernet"
+      ],
+      "targetMode": "RelWithDebInfo",
+      "defines": {
+        "STLIB_ETH": "1",
+        "PHY_TYPE": "LAN8700"
+      }
+    },
+
+    {
+      "name": "simulator",
+      "displayName": "Simulator",
+      "inherits": [
+        "sim"
+      ],
+      "targetMode": "Debug"
+    },
+    {
+      "name": "simulator-asan",
+      "displayName": "Simulator [ASAN+UBSAN]",
+      "inherits": [
+        "sim"
+      ],
+      "targetMode": "Debug",
+      "defines": {
+        "STLIB_ENABLE_SANITIZERS": "1"
+      }
+    }
+  ],
+
+  "variables": {
+    "STLIB_DIR": "deps/ST-LIB",
+    "HAL_SRC_DIR": "deps/ST-LIB/STM32CubeH7/Drivers/STM32H7xx_HAL_Driver/Src",
+    "LwIP_DIR": "deps/ST-LIB/STM32CubeH7/Middlewares/Third_Party/LwIP"
+  },
+
+  "buildInfo": [
+    {
+      "compilerFlags": [
+        "-Wno-psabi",
+        "-Wno-gnu-zero-varadic-macro-arguments",
+        "-Wno-inconsistent-missing-override",
+        "-fno-use-cxa-atexit",
+        "-fno-rtti",
+        "-Wno-address-of-packed-member",
+        "-std=c++23"
+      ],
+      "includePaths": [
+        "${STLIB_DIR}/Inc",
+        "${STLIB_DIR}/Inc/ST-LIB_LOW",
+        "${STLIB_DIR}/Inc/ST-LIB_HIGH",
+        "${STLIB_DIR}/Inc/STM32CubeH7Wrapper"
+      ]
+    },
+    {
+      "name": "Assume STLIB build is only for sim",
+      "when": {
+        "variable": "SIM_ON",
+        "op": "not equal",
+        "value": "1"
+      },
+      "includePaths": [
+        "Core/Inc"
+      ],
+      "sources": [
+        "Core/Src/main.cpp",
+        "Core/Src/sysmem.c",
+        "Core/Src/stm32h7xx_hal_msp.c",
+        "Core/Src/system_stm32h7xx.c",
+        "Core/Src/stm32h7xx_it.c",
+        "Core/Src/syscalls.c",
+        "Core/Src/config/leds_hard_fault.cpp",
+        "Core/Src/Runes/Pins.cpp",
+        "Core/Src/Runes/Runes.cpp"
+      ]
+    },
+    {
+      "when": {
+        "variable": "NUCLEO",
+        "op": "equal",
+        "value": "1"
+      },
+      "cDefines": [
+        "NUCLEO"
+      ]
+    },
+    {
+      "when": {
+        "variable": "SIM_ON",
+        "op": "equal",
+        "value": "1"
+      },
+      "cDefines": [
+        "SIM_ON"
+      ],
+      "includePaths": [
+        "${STLIB_DIR}/Inc/MockedDrivers"
+      ],
+      "sources": [
+        "${STLIB_DIR}/Src/HALAL/Services/Time/Scheduler.cpp",
+        "${STLIB_DIR}/Src/HALAL/Models/TimerDomain/TimerDomain.cpp",
+        "${STLIB_DIR}/Src/HALAL/Models/MPUManager/MPUManager.cpp",
+        "${STLIB_DIR}/Src/MockedDrivers/mocked_hal_adc.cpp",
+        "${STLIB_DIR}/Src/MockedDrivers/mocked_hal_dma.cpp",
+        "${STLIB_DIR}/Src/MockedDrivers/mocked_hal_spi.cpp",
+        "${STLIB_DIR}/Src/MockedDrivers/mocked_ll_tim.cpp",
+        "${STLIB_DIR}/Src/MockedDrivers/mocked_system_stm32h7xx.c",
+        "${STLIB_DIR}/Src/MockedDrivers/stm32h7xx_wrapper.c",
+        "${STLIB_DIR}/Src/MockedDrivers/NVIC.cpp"
+      ]
+    },
+
+    {
+      "when": {
+        "variable": "STLIB_ETH",
+        "op": "equal",
+        "value": "1"
+      },
+      "cDefines": [
+        "STLIB_ETH"
+      ],
+      "sources": [
+        "${STLIB_DIR}/Src/HALAL/Services/Communication/Ethernet/PHY/phy_select.c"
+      ]
+    },
+    {
+      "when": {
+        "variable": "PHY_TYPE",
+        "op": "equal",
+        "value": "LAN8742"
+      },
+      "cDefines": [
+        "USE_PHY_LAN8742"
+      ],
+      "includePaths": [
+        "${STLIB_DIR}/STM32CubeH7/Drivers/BSP/Components/lan8742"
+      ],
+      "sources": [
+        "${STLIB_DIR}/Src/HALAL/Services/Communication/Ethernet/PHY/lan8742.c",
+        "${STLIB_DIR}/STM32CubeH7/Drivers/BSP/Components/lan8742/lan8742.c"
+      ]
+    },
+    {
+      "when": {
+        "variable": "PHY_TYPE",
+        "op": "equal",
+        "value": "KSZ8041"
+      },
+      "cDefines": [
+        "USE_PHY_KSZ8041"
+      ],
+      "sources": [
+        "${STLIB_DIR}/Src/HALAL/Services/Communication/Ethernet/PHY/ksz8041.c"
+      ]
+    },
+    {
+      "when": {
+        "variable": "STLIB_ENABLE_SANITIZERS",
+        "op": "equal",
+        "value": "1"
+      },
+      "compilerFlags": [
+        "-fsanitize=address,undefined",
+        "-fno-omit-frame-pointer"
+      ]
+    },
+
+    {
+      "when": {
+        "variable": "SIM_ON",
+        "op": "not equal",
+        "value": "1"
+      },
+      "name": "ST-LIB Sources",
+      "sources": [
+        "${STLIB_DIR}/Tests/compile_checks/board_protection_contract.cpp",
+        "${STLIB_DIR}/startup_stm32h723zgtx.s",
+
+        "${STLIB_DIR}/Src/HALAL/HardFault/HardfaultTrace.c",
+        "${STLIB_DIR}/Src/HALAL/HALAL.cpp",
+        "${STLIB_DIR}/Src/HALAL/Models/DMA/DMA.cpp",
+        "${STLIB_DIR}/Src/HALAL/Models/HALconfig/Halconfig.cpp",
+        "${STLIB_DIR}/Src/HALAL/Models/LowPowerTimer/LowPowerTimer.cpp",
+        "${STLIB_DIR}/Src/HALAL/Models/MDMA/MDMA.cpp",
+        "${STLIB_DIR}/Src/HALAL/Models/MPUManager/MPUManager.cpp",
+        "${STLIB_DIR}/Src/HALAL/Models/Packets/Packet.cpp",
+        "${STLIB_DIR}/Src/HALAL/Models/Packets/SPIOrder.cpp",
+        "${STLIB_DIR}/Src/HALAL/Models/SPI/SPI2.cpp",
+        "${STLIB_DIR}/Src/HALAL/Models/DMA/DMA2.cpp",
+        "${STLIB_DIR}/Src/HALAL/Models/PinModel/Pin.cpp",
+        "${STLIB_DIR}/Src/HALAL/Models/TimerDomain/TimerDomain.cpp",
+        "${STLIB_DIR}/Src/HALAL/Services/CORDIC/CORDIC.cpp",
+        "${STLIB_DIR}/Src/HALAL/Services/Communication/FDCAN/FDCAN.cpp",
+        "${STLIB_DIR}/Src/HALAL/Services/Communication/I2C/I2C.cpp",
+        "${STLIB_DIR}/Src/HALAL/Services/Communication/SPI/SPI.cpp",
+        "${STLIB_DIR}/Src/HALAL/Services/Communication/UART/UART.cpp",
+        "${STLIB_DIR}/Src/HALAL/Services/DigitalInputService/DigitalInputService.cpp",
+        "${STLIB_DIR}/Src/HALAL/Services/DigitalOutputService/DigitalOutputService.cpp",
+        "${STLIB_DIR}/Src/HALAL/Services/Diagnostics/DiagnosticFormatter.cpp",
+        "${STLIB_DIR}/Src/HALAL/Services/Diagnostics/DiagnosticSinks.cpp",
+        "${STLIB_DIR}/Src/HALAL/Services/Diagnostics/DiagnosticTimestampProvider.cpp",
+        "${STLIB_DIR}/Src/HALAL/Services/Diagnostics/DiagnosticsHub.cpp",
+        "${STLIB_DIR}/Src/HALAL/Services/EXTI/EXTI.cpp",
+        "${STLIB_DIR}/Src/HALAL/Services/FMAC/FMAC.cpp",
+        "${STLIB_DIR}/Src/HALAL/Services/Flash/Flash.cpp",
+        "${STLIB_DIR}/Src/HALAL/Services/Flash/FlashTests/Flash_Test.cpp",
+        "${STLIB_DIR}/Src/HALAL/Services/InfoWarning/InfoWarning.cpp",
+        "${STLIB_DIR}/Src/HALAL/Services/Time/RTC.cpp",
+        "${STLIB_DIR}/Src/HALAL/Services/Time/Scheduler.cpp",
+        "${STLIB_DIR}/Src/HALAL/Services/Watchdog/Watchdog.cpp",
+        "${STLIB_DIR}/Src/HALAL/Services/DFSDM/DFSDM.cpp",
+
+        "${STLIB_DIR}/Src/ST-LIB_LOW/DigitalOutput/DigitalOutput.cpp",
+        "${STLIB_DIR}/Src/ST-LIB_LOW/ErrorHandler/ErrorHandler.cpp",
+        "${STLIB_DIR}/Src/ST-LIB_LOW/Math/Math.cpp",
+        "${STLIB_DIR}/Src/ST-LIB_LOW/Sd/Sd.cpp",
+        "${STLIB_DIR}/Src/ST-LIB_LOW/Sensors/DigitalSensor/DigitalSensor.cpp",
+        "${STLIB_DIR}/Src/ST-LIB_LOW/Sensors/SensorInterrupt/SensorInterrupt.cpp",
+
+        "${STLIB_DIR}/Src/ST-LIB_HIGH/FlashStorer/FlashStorer.cpp",
+        "${STLIB_DIR}/Src/ST-LIB_HIGH/FlashStorer/FlashVariable.cpp",
+        "${STLIB_DIR}/Src/ST-LIB_HIGH/Protections/FaultController.cpp"
+      ]
+    },
+    {
+      "name": "ST-LIB ETH Sources",
+      "when": {
+        "variable": "STLIB_ETH",
+        "op": "equal",
+        "value": "1"
+      },
+      "sources": [
+        "${STLIB_DIR}/Src/HALAL/Models/IPV4/IPV4.cpp",
+        "${STLIB_DIR}/Src/HALAL/Models/MAC/MAC.cpp",
+        "${STLIB_DIR}/Src/HALAL/Services/Communication/SNTP/SNTP.cpp",
+
+        "${STLIB_DIR}/Src/HALAL/Services/Communication/Ethernet/LWIP/Ethernet.cpp",
+        "${STLIB_DIR}/Src/HALAL/Services/Communication/Ethernet/LWIP/EthernetNode.cpp",
+        "${STLIB_DIR}/Src/HALAL/Services/Communication/Ethernet/LWIP/TCP/OrderProtocol.cpp",
+        "${STLIB_DIR}/Src/HALAL/Services/Communication/Ethernet/LWIP/TCP/ServerSocket.cpp",
+        "${STLIB_DIR}/Src/HALAL/Services/Communication/Ethernet/LWIP/TCP/Socket.cpp",
+        "${STLIB_DIR}/Src/HALAL/Services/Communication/Ethernet/LWIP/UDP/DatagramSocket.cpp",
+
+        "${STLIB_DIR}/Src/ST-LIB_LOW/Communication/Server/Server.cpp",
+        "${STLIB_DIR}/Src/ST-LIB_LOW/StateMachine/StateOrder.cpp"
+      ]
+    },
+    {
+      "name": "HAL Sources",
+      "when": {
+        "variable": "SIM_ON",
+        "op": "not equal",
+        "value": "1"
+      },
+      "cDefines": [
+        "USE_HAL_DRIVER",
+        "STM32H723xx"
+      ],
+      "compilerFlags": [
+        "-mcpu=cortex-m7",
+        "-mfpu=fpv5-d16",
+        "-mthumb",
+        "-specs=nosys.specs",
+        "-ffunction-sections",
+        "-fno-exceptions",
+        "-lc",
+        "-lm",
+        "-lnosys"
+      ],
+      "linkerFlags": [
+        "-Tdeps/ST-LIB/STM32H723ZGTX_FLASH.ld",
+        "-mcpu=cortex-m7",
+        "-mfpu=fpv5-d16",
+        "-mthumb",
+        "-specs=nosys.specs",
+        "-ffunction-sections",
+        "-fno-exceptions",
+        "-Wl,--gc-sections",
+        "-Wl,-Map=template-project.map,--cref"
+      ],
+      "includePaths": [
+        "${STLIB_DIR}/STM32CubeH7/Drivers/CMSIS/Device/ST/STM32H7xx/Include",
+        "${STLIB_DIR}/STM32CubeH7/Drivers/CMSIS/Include",
+        "${STLIB_DIR}/STM32CubeH7/Drivers/CMSIS/Core_A/Include",
+        "${STLIB_DIR}/STM32CubeH7/Drivers/STM32H7xx_HAL_Driver/Inc",
+        "${STLIB_DIR}/STM32CubeH7/Drivers/STM32H7xx_HAL_Driver/Inc/Legacy"
+      ],
+      "sources": [
+        "${HAL_SRC_DIR}/stm32h7xx_hal.c",
+
+        "${HAL_SRC_DIR}/stm32h7xx_hal_cortex.c",
+        "${HAL_SRC_DIR}/stm32h7xx_hal_rcc.c",
+        "${HAL_SRC_DIR}/stm32h7xx_hal_rcc_ex.c",
+        "${HAL_SRC_DIR}/stm32h7xx_hal_flash.c",
+        "${HAL_SRC_DIR}/stm32h7xx_hal_flash_ex.c",
+        "${HAL_SRC_DIR}/stm32h7xx_hal_pwr.c",
+        "${HAL_SRC_DIR}/stm32h7xx_hal_pwr_ex.c",
+        "${HAL_SRC_DIR}/stm32h7xx_hal_dma.c",
+        "${HAL_SRC_DIR}/stm32h7xx_hal_dma_ex.c",
+
+        "${HAL_SRC_DIR}/stm32h7xx_hal_gpio.c",
+        "${HAL_SRC_DIR}/stm32h7xx_hal_exti.c",
+
+        "${HAL_SRC_DIR}/stm32h7xx_hal_mdma.c",
+
+        "${HAL_SRC_DIR}/stm32h7xx_hal_adc.c",
+        "${HAL_SRC_DIR}/stm32h7xx_hal_adc_ex.c",
+
+        "${HAL_SRC_DIR}/stm32h7xx_hal_dfsdm.c",
+
+        "${HAL_SRC_DIR}/stm32h7xx_hal_tim.c",
+        "${HAL_SRC_DIR}/stm32h7xx_hal_tim_ex.c",
+
+        "${HAL_SRC_DIR}/stm32h7xx_hal_uart.c",
+        "${HAL_SRC_DIR}/stm32h7xx_hal_uart_ex.c",
+
+        "${HAL_SRC_DIR}/stm32h7xx_hal_sd.c",
+        "${HAL_SRC_DIR}/stm32h7xx_hal_sd_ex.c",
+        "${HAL_SRC_DIR}/stm32h7xx_ll_sdmmc.c",
+
+        "${HAL_SRC_DIR}/stm32h7xx_hal_fdcan.c",
+
+        "${HAL_SRC_DIR}/stm32h7xx_hal_spi.c",
+
+        "${HAL_SRC_DIR}/stm32h7xx_hal_lptim.c",
+
+        "${HAL_SRC_DIR}/stm32h7xx_hal_rtc.c",
+        "${HAL_SRC_DIR}/stm32h7xx_hal_rtc_ex.c",
+
+        "${HAL_SRC_DIR}/stm32h7xx_hal_i2c.c",
+        "${HAL_SRC_DIR}/stm32h7xx_hal_i2c_ex.c",
+
+        "${HAL_SRC_DIR}/stm32h7xx_hal_fmac.c",
+
+        "${HAL_SRC_DIR}/stm32h7xx_hal_cordic.c",
+
+        "${HAL_SRC_DIR}/stm32h7xx_hal_wwdg.c",
+        "${HAL_SRC_DIR}/stm32h7xx_hal_iwdg.c"
+      ]
+    },
+    {
+      "name": "HAL Ethernet Sources",
+      "when": {
+        "variable": "HAL_ETHERNET",
+        "op": "equal",
+        "value": "1"
+      },
+      "sources": [
+        "${HAL_SRC_DIR}/stm32h7xx_hal_eth.c",
+        "${HAL_SRC_DIR}/stm32h7xx_hal_eth_ex.c"
+      ]
+    },
+    {
+      "name": "LwIP Sources",
+      "when": {
+        "variable": "HAL_ETHERNET",
+        "op": "equal",
+        "value": "1"
+      },
+      "includePaths": [
+        "${LwIP_DIR}/src/include",
+        "${LwIP_DIR}/system",
+        "${LwIP_DIR}/src/netif/ppp",
+        "${LwIP_DIR}/src/include/lwip",
+        "${LwIP_DIR}/src/include/lwip/apps",
+        "${LwIP_DIR}/src/include/lwip/priv",
+        "${LwIP_DIR}/src/include/lwip/prot",
+        "${LwIP_DIR}/src/include/netif",
+        "${LwIP_DIR}/src/include/compat",
+        "${LwIP_DIR}/src/include/compat/posix",
+        "${LwIP_DIR}/src/include/compat/posix/arpa",
+        "${LwIP_DIR}/src/include/compat/posix/net",
+        "${LwIP_DIR}/src/include/compat/posix/sys",
+        "${LwIP_DIR}/src/include/compat/stdc",
+        "${LwIP_DIR}/system/arch",
+
+        "${STLIB_DIR}/STM32CubeH7/Drivers/BSP/Components",
+        "${STLIB_DIR}/LWIP/App",
+        "${STLIB_DIR}/LWIP/Target"
+      ],
+      "sources": [
+        "${LwIP_DIR}/src/core/def.c",
+        "${LwIP_DIR}/src/core/init.c",
+        "${LwIP_DIR}/src/core/ip.c",
+        "${LwIP_DIR}/src/core/inet_chksum.c",
+        "${LwIP_DIR}/src/core/mem.c",
+        "${LwIP_DIR}/src/core/memp.c",
+        "${LwIP_DIR}/src/core/netif.c",
+        "${LwIP_DIR}/src/core/pbuf.c",
+        "${LwIP_DIR}/src/core/raw.c",
+        "${LwIP_DIR}/src/core/stats.c",
+        "${LwIP_DIR}/src/core/sys.c",
+        "${LwIP_DIR}/src/core/tcp.c",
+        "${LwIP_DIR}/src/core/tcp_in.c",
+        "${LwIP_DIR}/src/core/tcp_out.c",
+        "${LwIP_DIR}/src/core/timeouts.c",
+        "${LwIP_DIR}/src/core/udp.c",
+        "${LwIP_DIR}/src/core/ipv4/etharp.c",
+        "${LwIP_DIR}/src/core/ipv4/icmp.c",
+        "${LwIP_DIR}/src/core/ipv4/ip4.c",
+        "${LwIP_DIR}/src/core/ipv4/ip4_addr.c",
+        "${LwIP_DIR}/src/core/ipv4/ip4_frag.c",
+        "${LwIP_DIR}/src/apps/sntp/sntp.c",
+        "${LwIP_DIR}/src/netif/ethernet.c",
+
+        "${STLIB_DIR}/LWIP/App/lwip.c",
+        "${STLIB_DIR}/LWIP/Target/ethernetif.c"
+      ]
+    }
+  ]
+}

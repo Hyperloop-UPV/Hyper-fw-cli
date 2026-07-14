@@ -428,7 +428,8 @@ run_build_example_cmake :: proc(example, test: string, no_test: bool, preset, bo
   print_action("Build", details[:])
 
   configure_cmd := make([dynamic]string, context.temp_allocator)
-  append(&configure_cmd, "cmake", "--preset", preset, "-B", binary_dir)
+  append(&configure_cmd, "cmake", "--preset", preset, "-B", binary_dir,
+    "-DCMAKE_VERBOSE_MAKEFILE:BOOL=ON")
   append(&configure_cmd, fmt.tprintf("-DBUILD_EXAMPLES=%s", build_examples))
   append(&configure_cmd, "-DCMAKE_EXPORT_COMPILE_COMMANDS=OFF")
   if define_flags != "" {
@@ -445,7 +446,8 @@ run_build_example_cmake :: proc(example, test: string, no_test: bool, preset, bo
   }
 
   build_cmd := make([dynamic]string, context.temp_allocator)
-  append(&build_cmd, "cmake", "--build", binary_dir)
+  append(&build_cmd, "cmake", "--build", binary_dir, "--", 
+    "-d", /* "keeprsp" */ "keepdepfile")
   if jobs > 0 {
     append(&build_cmd, "-j", fmt.tprint(jobs))
   }
@@ -1033,7 +1035,7 @@ run_build_example :: proc(example, test: string, no_test: bool, preset, board_na
     }
     return ok
   } else {
-    fmt.eprintln("Missing 'hyper-build.json")
+    fmt.eprintln("ERROR: Missing 'hyper-build.json' file")
     return false
   }
 }
