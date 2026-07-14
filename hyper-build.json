@@ -260,6 +260,9 @@
         "Core/Src/config/leds_hard_fault.cpp",
         "Core/Src/Runes/Pins.cpp",
         "Core/Src/Runes/Runes.cpp"
+      ],
+      "linkerFlags": [
+        "-lstdc++"
       ]
     },
     {
