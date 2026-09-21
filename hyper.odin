@@ -131,12 +131,23 @@ command_path :: proc(name: string, allocator := context.allocator) -> string
 
   sep: [1]u8 = {os.Path_List_Separator}
   path_split_char := string(sep[:])
+  home_dir, _ := os.user_home_dir(context.temp_allocator)
   for dir in strings.split_iterator(&path_env, path_split_char) {
     if dir == "" {
       continue
     }
 
-    path, _ := os.join_path({dir, name}, context.temp_allocator)
+    // Expand a leading ~/ so PATH entries like "~/hyperloop/Odin/" keep working
+    dir_expanded := dir
+    if len(dir) > 0 && dir[0] == '~' {
+      if dir == "~" {
+        dir_expanded = home_dir
+      } else if strings.has_prefix(dir, "~/") {
+        dir_expanded, _ = os.join_path({home_dir, dir[2:]}, context.temp_allocator)
+      }
+    }
+
+    path, _ := os.join_path({dir_expanded, name}, context.temp_allocator)
     when ODIN_OS == .Windows {
       extensions := []string{"", "exe", "bat", "cmd", "com"}
       for ext in extensions {
@@ -173,7 +184,17 @@ setup_globals :: proc()
   fmt.assertf(os_err == nil, "Could not get executable directory: %v", os_err)
 
   setup_path(&TOOLS_DIR, {REPO_ROOT, "tools"})
-  setup_path(&STLIB_ROOT, {REPO_ROOT, "deps", "ST-LIB"})
+  {
+    // When running directly inside ST-LIB there is no deps/ST-LIB submodule,
+    // so treat the repo root itself as the ST-LIB root.
+    candidate, _ := os.join_path({REPO_ROOT, "deps", "ST-LIB"}, context.temp_allocator)
+    root_build, _ := os.join_path({REPO_ROOT, "tools", "build.py"}, context.temp_allocator)
+    if !os.is_dir(candidate) && os.is_file(root_build) {
+      STLIB_ROOT = strings.clone(REPO_ROOT, context.allocator)
+    } else {
+      STLIB_ROOT = strings.clone(candidate, context.allocator)
+    }
+  }
   setup_path(&BUILD_EXAMPLE_SCRIPT, {TOOLS_DIR, "build-example.sh"})
   setup_path(&PREFLASH_CHECK_SCRIPT, {TOOLS_DIR, "preflash_check.py"})
   setup_path(&INIT_SCRIPT, {TOOLS_DIR, "init.sh"})
@@ -411,37 +432,47 @@ clt_root_candidates :: proc(version: string = "") -> [dynamic]string
   }
 
   for ver in version_patterns {
-    suffixes: [4]string
+    suffixes: [8]string
     if ver != "" {
       suffixes[0] = fmt.tprintf("STM32CubeCLT_%s", ver)
       suffixes[1] = fmt.tprintf("STM32CubeCLT-%s", ver)
+      suffixes[2] = fmt.tprintf("stm32cubeclt_%s", ver)
+      suffixes[3] = fmt.tprintf("stm32cubeclt-%s", ver)
       when ODIN_OS == .Darwin || ODIN_OS == .Linux {
-        suffixes[2] = fmt.tprintf("STM32CubeCLT_%s*", ver)
-        suffixes[3] = fmt.tprintf("STM32CubeCLT-%s*", ver)
+        suffixes[4] = fmt.tprintf("STM32CubeCLT_%s*", ver)
+        suffixes[5] = fmt.tprintf("STM32CubeCLT-%s*", ver)
+        suffixes[6] = fmt.tprintf("stm32cubeclt_%s*", ver)
+        suffixes[7] = fmt.tprintf("stm32cubeclt-%s*", ver)
       }
     }
 
     when ODIN_OS == .Darwin || ODIN_OS == .Linux {
       home_dir, _ := os.user_home_dir(context.temp_allocator)
-      base_dirs := []string{"/opt/ST", home_dir, "ST"}
+      home_ST, _ := os.join_path({home_dir, "ST"}, context.temp_allocator)
+      home_st, _ := os.join_path({home_dir, "st"}, context.temp_allocator)
+      // NOTE: the .deb bundle installs to lowercase /opt/st/stm32cubeclt_X.Y.Z,
+      // so both capitalizations must be searched (Linux globs are case-sensitive).
+      base_dirs := []string{"/opt/ST", "/opt/st", home_dir, home_ST, home_st}
       for base_dir in base_dirs {
         if !os.is_dir(base_dir) {
           continue
         }
         if ver != "" {
           for suffix in suffixes {
+            if suffix == "" {
+              continue
+            }
             path, _ := os.join_path({base_dir, suffix}, context.temp_allocator)
             paths, _ := os.glob(path, context.allocator)
             append(&candidates, ..paths[:])
           }
         } else {
-          path, _ := os.join_path({base_dir, "STM32CubeCLT_*"}, context.temp_allocator)
-          paths, _ := os.glob(path, context.allocator)
-          append(&candidates, ..paths[:])
-
-          path, _ = os.join_path({base_dir, "STM32CubeCLT-*"}, context.temp_allocator)
-          paths, _ = os.glob(path, context.allocator)
-          append(&candidates, ..paths[:])
+          patterns := []string{"STM32CubeCLT_*", "STM32CubeCLT-*", "stm32cubeclt_*", "stm32cubeclt-*"}
+          for pattern in patterns {
+            path, _ := os.join_path({base_dir, pattern}, context.temp_allocator)
+            paths, _ := os.glob(path, context.allocator)
+            append(&candidates, ..paths[:])
+          }
         }
       }
     } else {
@@ -594,6 +625,28 @@ clt_tool_status :: proc(relpath: string, version_args: []string, version_pattern
   inferred_root := infer_clt_root_from_tool(path_status.path)
   if len(inferred_root) != 0 {
     path_status.clt_version = parse_clt_version_from_path(inferred_root)
+  }
+  if path_status.path == "" {
+    // Fall back to the bare binary name so distro packages (e.g. apt's
+    // arm-none-eabi-gcc) are reported instead of "not found".
+    // CLT version stays empty, so the version check still fails honestly.
+    base := relpath
+    for i := len(relpath) - 1; i >= 0; i -= 1 {
+      if relpath[i] == '/' || relpath[i] == '\\' {
+        base = relpath[i+1:]
+        break
+      }
+    }
+    if base != relpath {
+      base_status := inspect_tool(base, version_args, version_pattern)
+      if base_status.path != "" {
+        inferred := infer_clt_root_from_tool(base_status.path)
+        if len(inferred) != 0 {
+          base_status.clt_version = parse_clt_version_from_path(inferred)
+        }
+        return base_status
+      }
+    }
   }
   return path_status
 }
@@ -1219,7 +1272,7 @@ known_uv_paths :: proc(allocator := context.allocator) -> []string
   local_path, _ := os.join_path({home_dir, ".local", "bin", "uv" + platform.EXECUTABLE_EXTENSION}, allocator)
   cargo_path, _ := os.join_path({home_dir, ".cargo", "bin", "uv" + platform.EXECUTABLE_EXTENSION}, allocator)
 
-  paths := make([dynamic]string, 2, allocator = allocator)
+  paths := make([dynamic]string, 0, 2, allocator = allocator)
   if os.is_file(local_path) {
     append(&paths, local_path)
   }
