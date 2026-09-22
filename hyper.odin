@@ -189,6 +189,9 @@ setup_globals :: proc()
     // so treat the repo root itself as the ST-LIB root.
     candidate, _ := os.join_path({REPO_ROOT, "deps", "ST-LIB"}, context.temp_allocator)
     root_build, _ := os.join_path({REPO_ROOT, "tools", "build.py"}, context.temp_allocator)
+
+    if STLIB_ROOT != "" { delete(STLIB_ROOT) }
+
     if !os.is_dir(candidate) && os.is_file(root_build) {
       STLIB_ROOT = strings.clone(REPO_ROOT, context.allocator)
     } else {
@@ -424,7 +427,7 @@ clt_root_candidates :: proc(version: string = "") -> [dynamic]string
       fmt.eprintfln("Could not get abs path of %s: %v", DEFAULT_CLT_ROOT, err)
       return candidates
     }
-    append(&candidates, path)
+    append(&candidates, strings.clone(path, context.allocator))
   }
 
   if version != "" {
@@ -600,7 +603,12 @@ infer_clt_root_from_tool :: proc(path: string, allocator := context.allocator) -
 clt_tool_status :: proc(relpath: string, version_args: []string, version_pattern: string) -> ToolStatus
 {
   root_candidates := clt_root_candidates(DEFAULT_REQUIRED_CLT_VERSION)
-  defer delete(root_candidates)
+  defer {
+    for candidate in root_candidates {
+      delete(candidate)
+    }
+    delete(root_candidates)
+  }
 
   for root in root_candidates {
     tool_path, err := os.join_path({root, relpath}, context.allocator)
