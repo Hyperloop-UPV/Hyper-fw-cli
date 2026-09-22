@@ -1,4 +1,3 @@
-# .github/workflows/build.yml
 name: Build binaries
 
 on:
@@ -11,14 +10,21 @@ jobs:
     container:
       image: debian:bullseye
     steps:
+      # Bullseye reached EOL on 2026-08-31. The bullseye-security pool files
+      # have been withdrawn from deb.debian.org while the index still lists
+      # them, causing the 404s. Pin to an immutable snapshot taken just
+      # before EOL so the index and pool files are always consistent.
+      - name: Pin apt to snapshot.debian.org (Bullseye EOL workaround)
+        run: |
+          cat > /etc/apt/sources.list <<'EOF'
+          deb http://snapshot.debian.org/archive/debian/20260824T000000Z bullseye main
+          deb http://snapshot.debian.org/archive/debian-security/20260824T000000Z bullseye-security main
+          EOF
+          echo 'Acquire::Check-Valid-Until "false";' > /etc/apt/apt.conf.d/99snapshot
+          echo 'Acquire::Retries "5";'            > /etc/apt/apt.conf.d/99retries
+
       - name: Install system dependencies
         run: |
-          # Make apt resilient to the transient 404s that deb.debian.org's
-          # CDN occasionally serves (mirror drift between Packages index
-          # and the actual pool files).
-          echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/99retries
-          echo 'Acquire::http::Pipeline-Depth "0";' >> /etc/apt/apt.conf.d/99retries
-
           apt-get update
           apt-get install -y --no-install-recommends --fix-missing \
             ca-certificates \
@@ -68,18 +74,24 @@ jobs:
     container:
       image: debian:bullseye
     steps:
+      - name: Enable arm64 architecture
+        run: dpkg --add-architecture arm64
+
+      # Same Bullseye EOL workaround as the x64 job. Do NOT list per-arch
+      # duplicates of the same repo — a single deb line pulls Packages
+      # indexes for all enabled architectures, and duplicating them causes
+      # apt warnings and can desync libc6 from libc6-dev.
+      - name: Pin apt to snapshot.debian.org (Bullseye EOL workaround)
+        run: |
+          cat > /etc/apt/sources.list <<'EOF'
+          deb http://snapshot.debian.org/archive/debian/20260824T000000Z bullseye main
+          deb http://snapshot.debian.org/archive/debian-security/20260824T000000Z bullseye-security main
+          EOF
+          echo 'Acquire::Check-Valid-Until "false";' > /etc/apt/apt.conf.d/99snapshot
+          echo 'Acquire::Retries "5";'            > /etc/apt/apt.conf.d/99retries
+
       - name: Install system dependencies and cross-compilation toolchain
         run: |
-          # Enable arm64 as a foreign architecture. A single deb line per
-          # repo will then pull BOTH amd64 and arm64 Packages indexes —
-          # do NOT add per-arch duplicates, that causes the
-          # "configured multiple times" warnings and can desync libc6
-          # from libc6-dev.
-          dpkg --add-architecture arm64
-
-          echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/99retries
-          echo 'Acquire::http::Pipeline-Depth "0";' >> /etc/apt/apt.conf.d/99retries
-
           apt-get update
           apt-get install -y --no-install-recommends --fix-missing \
             ca-certificates \
