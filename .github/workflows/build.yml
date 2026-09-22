@@ -13,23 +13,37 @@ jobs:
     steps:
       - name: Install system dependencies
         run: |
+          # Pin to snapshot.debian.org for reproducible, immutable package availability.
+          # This eliminates the intermittent 404s from deb.debian.org mirror/CDN drift.
+          cat > /etc/apt/sources.list <<'EOF'
+          deb http://snapshot.debian.org/archive/debian/20240601T000000Z bullseye main
+          deb http://snapshot.debian.org/archive/debian-security/20240601T000000Z bullseye-security main
+          EOF
+          echo 'Acquire::Check-Valid-Until "false";' > /etc/apt/apt.conf.d/99no-check-valid-until
+          echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/99retries
+
           apt-get update
-          apt-get install -y --no-install-recommends \
+          apt-get install -y --no-install-recommends --fix-missing \
             ca-certificates \
             curl \
             git \
             build-essential \
             gnupg
-          echo "deb http://apt.llvm.org/bullseye/ llvm-toolchain-bullseye-14 main" \
+
+          # Modern keyring approach (apt-key is deprecated)
+          curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key \
+            | gpg --dearmor -o /usr/share/keyrings/llvm.gpg
+          echo "deb [signed-by=/usr/share/keyrings/llvm.gpg] http://apt.llvm.org/bullseye/ llvm-toolchain-bullseye-14 main" \
             > /etc/apt/sources.list.d/llvm.list
-          curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key | apt-key add -
+
           apt-get update
-          apt-get install -y --no-install-recommends \
+          apt-get install -y --no-install-recommends --fix-missing \
             llvm-14-dev \
             clang-14 \
             lld-14
-          ln -s /usr/bin/llvm-config-14 /usr/local/bin/llvm-config-14
-          ln -s /usr/bin/clang-14 /usr/local/bin/clang
+
+          ln -sf /usr/bin/llvm-config-14 /usr/local/bin/llvm-config
+          ln -sf /usr/bin/clang-14       /usr/local/bin/clang
 
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -41,10 +55,9 @@ jobs:
 
       - name: Compile Linux x64
         run: |
-          export LLVM_CONFIG=/usr/bin/llvm-config-14
           odin build . -out:hyper-linux-x64 -o:speed -target:linux_amd64
         env:
-          LLVM_CONFIG: /usr/bin/llvm-config-14
+          LLVM_CONFIG: /usr/local/bin/llvm-config
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -61,9 +74,19 @@ jobs:
       - name: Install system dependencies and cross-compilation toolchain
         run: |
           dpkg --add-architecture arm64
-          
+
+          # Pin to snapshot.debian.org (see x64 job for rationale)
+          cat > /etc/apt/sources.list <<'EOF'
+          deb [arch=amd64] http://snapshot.debian.org/archive/debian/20240601T000000Z bullseye main
+          deb [arch=amd64] http://snapshot.debian.org/archive/debian-security/20240601T000000Z bullseye-security main
+          deb [arch=arm64] http://snapshot.debian.org/archive/debian/20240601T000000Z bullseye main
+          deb [arch=arm64] http://snapshot.debian.org/archive/debian-security/20240601T000000Z bullseye-security main
+          EOF
+          echo 'Acquire::Check-Valid-Until "false";' > /etc/apt/apt.conf.d/99no-check-valid-until
+          echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/99retries
+
           apt-get update
-          apt-get install -y --no-install-recommends \
+          apt-get install -y --no-install-recommends --fix-missing \
             ca-certificates \
             curl \
             git \
@@ -71,24 +94,24 @@ jobs:
             gnupg \
             crossbuild-essential-arm64 \
             libc6-dev-arm64-cross
-          
-          # Add LLVM repo
-          echo "deb http://apt.llvm.org/bullseye/ llvm-toolchain-bullseye-14 main" \
+
+          # Add LLVM repo (modern keyring approach)
+          curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key \
+            | gpg --dearmor -o /usr/share/keyrings/llvm.gpg
+          echo "deb [signed-by=/usr/share/keyrings/llvm.gpg] http://apt.llvm.org/bullseye/ llvm-toolchain-bullseye-14 main" \
             > /etc/apt/sources.list.d/llvm.list
-          echo "deb-src http://apt.llvm.org/bullseye/ llvm-toolchain-bullseye-14 main" \
+          echo "deb-src [signed-by=/usr/share/keyrings/llvm.gpg] http://apt.llvm.org/bullseye/ llvm-toolchain-bullseye-14 main" \
             >> /etc/apt/sources.list.d/llvm.list
-          
-          curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key | apt-key add -
-          
+
           apt-get update
-          apt-get install -y --no-install-recommends \
+          apt-get install -y --no-install-recommends --fix-missing \
             clang-14 \
             lld-14 \
             llvm-14-dev
-          
+
           ln -sf /usr/bin/llvm-config-14 /usr/local/bin/llvm-config
-          ln -sf /usr/bin/clang-14 /usr/local/bin/clang
-          ln -sf /usr/bin/ld.lld-14 /usr/local/bin/ld.lld
+          ln -sf /usr/bin/clang-14       /usr/local/bin/clang
+          ln -sf /usr/bin/ld.lld-14      /usr/local/bin/ld.lld
 
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -100,17 +123,17 @@ jobs:
 
       - name: Compile Linux ARM64
         run: |
-          export LLVM_CONFIG=/usr/local/bin/llvm-config
-          export CC="clang-14"
-          export CXX="clang++-14"
-          export AR="llvm-ar-14"
-          export LD="ld.lld"
-          export CFLAGS="--target=aarch64-linux-gnu -fuse-ld=lld"
-          export LDFLAGS="--target=aarch64-linux-gnu -fuse-ld=lld"
-          export LIBRARY_PATH=/usr/aarch64-linux-gnu/lib:$LIBRARY_PATH
-          
           odin build . -out:hyper-linux-arm64 -o:speed -target:linux_arm64 \
             -extra-linker-flags:"--target=aarch64-linux-gnu -fuse-ld=lld"
+        env:
+          LLVM_CONFIG: /usr/local/bin/llvm-config
+          CC: clang-14
+          CXX: clang++-14
+          AR: llvm-ar-14
+          LD: ld.lld
+          CFLAGS: "--target=aarch64-linux-gnu -fuse-ld=lld"
+          LDFLAGS: "--target=aarch64-linux-gnu -fuse-ld=lld"
+          LIBRARY_PATH: "/usr/aarch64-linux-gnu/lib"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
