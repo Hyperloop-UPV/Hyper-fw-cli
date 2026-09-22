@@ -13,14 +13,11 @@ jobs:
     steps:
       - name: Install system dependencies
         run: |
-          # Pin to snapshot.debian.org for reproducible, immutable package availability.
-          # This eliminates the intermittent 404s from deb.debian.org mirror/CDN drift.
-          cat > /etc/apt/sources.list <<'EOF'
-          deb http://snapshot.debian.org/archive/debian/20240601T000000Z bullseye main
-          deb http://snapshot.debian.org/archive/debian-security/20240601T000000Z bullseye-security main
-          EOF
-          echo 'Acquire::Check-Valid-Until "false";' > /etc/apt/apt.conf.d/99no-check-valid-until
+          # Make apt resilient to the transient 404s that deb.debian.org's
+          # CDN occasionally serves (mirror drift between Packages index
+          # and the actual pool files).
           echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/99retries
+          echo 'Acquire::http::Pipeline-Depth "0";' >> /etc/apt/apt.conf.d/99retries
 
           apt-get update
           apt-get install -y --no-install-recommends --fix-missing \
@@ -73,17 +70,15 @@ jobs:
     steps:
       - name: Install system dependencies and cross-compilation toolchain
         run: |
+          # Enable arm64 as a foreign architecture. A single deb line per
+          # repo will then pull BOTH amd64 and arm64 Packages indexes —
+          # do NOT add per-arch duplicates, that causes the
+          # "configured multiple times" warnings and can desync libc6
+          # from libc6-dev.
           dpkg --add-architecture arm64
 
-          # Pin to snapshot.debian.org (see x64 job for rationale)
-          cat > /etc/apt/sources.list <<'EOF'
-          deb [arch=amd64] http://snapshot.debian.org/archive/debian/20240601T000000Z bullseye main
-          deb [arch=amd64] http://snapshot.debian.org/archive/debian-security/20240601T000000Z bullseye-security main
-          deb [arch=arm64] http://snapshot.debian.org/archive/debian/20240601T000000Z bullseye main
-          deb [arch=arm64] http://snapshot.debian.org/archive/debian-security/20240601T000000Z bullseye-security main
-          EOF
-          echo 'Acquire::Check-Valid-Until "false";' > /etc/apt/apt.conf.d/99no-check-valid-until
           echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/99retries
+          echo 'Acquire::http::Pipeline-Depth "0";' >> /etc/apt/apt.conf.d/99retries
 
           apt-get update
           apt-get install -y --no-install-recommends --fix-missing \
@@ -100,8 +95,6 @@ jobs:
             | gpg --dearmor -o /usr/share/keyrings/llvm.gpg
           echo "deb [signed-by=/usr/share/keyrings/llvm.gpg] http://apt.llvm.org/bullseye/ llvm-toolchain-bullseye-14 main" \
             > /etc/apt/sources.list.d/llvm.list
-          echo "deb-src [signed-by=/usr/share/keyrings/llvm.gpg] http://apt.llvm.org/bullseye/ llvm-toolchain-bullseye-14 main" \
-            >> /etc/apt/sources.list.d/llvm.list
 
           apt-get update
           apt-get install -y --no-install-recommends --fix-missing \
