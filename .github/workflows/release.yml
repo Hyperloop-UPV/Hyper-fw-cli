@@ -61,7 +61,7 @@ jobs:
 
           # Expected format: "hyper vx.y.z"
           VERSION=$(printf '%s\n' "$RAW" \
-            | sed -nE 's/^hyper[[:space:]]+(v[0-9]+\.[0-9]+\.[0-9]+).*/\1/p' \
+            | sed -nE 's/^.*[[:space:]](v[0-9]+\.[0-9]+\.[0-9]+)[[:space:]]*$/\1/p' \
             | head -n1)
 
           if [ -z "$VERSION" ]; then
