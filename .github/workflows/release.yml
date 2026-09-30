@@ -43,7 +43,16 @@ jobs:
           RUN_ID: ${{ inputs.build_run_id || github.event.workflow_run.id }}
         run: |
           mkdir -p artifacts
-          gh run download "$RUN_ID" -D artifacts
+          for attempt in 1 2 3 4 5; do
+            if gh run download "$RUN_ID" -D artifacts; then
+              echo "Download succeeded on attempt $attempt"
+              exit 0
+            fi
+            echo "Attempt $attempt failed, retrying in $((attempt * 5))s..."
+            sleep $((attempt * 5))
+          done
+          echo "::error::Failed to download artifacts after 5 attempts"
+          exit 1
 
       - name: Flatten artifacts into ./release_files
         run: |
@@ -59,7 +68,7 @@ jobs:
           RAW=$(./release_files/hyper-linux-x64 version -quiet)
           echo "Raw output: $RAW"
 
-          # Expected format: "hyper vx.y.z"
+          # Expected format: "args[0] v0.2.4"
           VERSION=$(printf '%s\n' "$RAW" \
             | sed -nE 's/^.*[[:space:]](v[0-9]+\.[0-9]+\.[0-9]+)[[:space:]]*$/\1/p' \
             | head -n1)
@@ -72,32 +81,128 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "Parsed version: $VERSION"
 
-      - name: Build release notes from commit messages
+      - name: Compute commit range and write commit log
+        id: range
         run: |
-          # Find the most recent tag that looks like vX.Y.Z (any version)
-          PREV_TAG=$(git tag --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n1 || true)
+          # Find the most recent tag that looks like vX.Y.Z
+          PREV_TAG=$(git tag --sort=-v:refname \
+                     | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
+                     | head -n1 || true)
 
           if [ -n "$PREV_TAG" ]; then
             RANGE="${PREV_TAG}..HEAD"
+            echo "base=$PREV_TAG" >> "$GITHUB_OUTPUT"
             echo "Using commit range: $RANGE"
           else
             RANGE="HEAD"
-            echo "No previous version tag found; listing recent commits."
+            echo "base=" >> "$GITHUB_OUTPUT"
+            echo "No previous version tag found; using all history."
           fi
 
-          git log "$RANGE" -n 50 --pretty=format:'- %s (`%h`)' > /tmp/commits.md
+          # Cap at 250 commits for the log listing (sanity limit);
+          # contributor extraction uses the API and isn't capped.
+          git log "$RANGE" -n 250 --pretty=format:'- %s (`%h`)' > /tmp/commits.md
 
           {
             echo "## Changelog"
             echo
             cat /tmp/commits.md
-            echo
-            echo
-            echo "_Built from commit \`${GITHUB_SHA::7}\`._"
           } > release_notes.md
 
-          echo "----- release notes preview -----"
-          cat release_notes.md
+      - name: Append contributors for this release
+        uses: actions/github-script@v7
+        env:
+          BASE_TAG: ${{ steps.range.outputs.base }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+        with:
+          script: |
+            const fs = require('fs');
+            const { owner, repo } = context.repo;
+            const base = process.env.BASE_TAG;         // e.g. "v0.2.3" or ""
+            const head = process.env.HEAD_SHA;         // full SHA
+
+            // 1) Resolve BASE_TAG (if any) to a commit SHA.
+            //    If no previous tag, we'll walk all commits reachable from head.
+            let baseSha = null;
+            if (base) {
+              try {
+                const ref = await github.rest.git.getRef({
+                  owner, repo, ref: `tags/${base}`,
+                });
+                baseSha = ref.data.object.sha;
+
+                // Handle annotated tags: the ref points at a tag object,
+                // not directly at the commit.
+                if (ref.data.object.type === 'tag') {
+                  const tagObj = await github.rest.git.getTag({
+                    owner, repo, tag_sha: baseSha,
+                  });
+                  baseSha = tagObj.data.object.sha;
+                }
+                core.info(`Base tag ${base} resolves to ${baseSha}`);
+              } catch (err) {
+                core.warning(`Could not resolve tag ${base}: ${err.message}`);
+                baseSha = null;
+              }
+            }
+
+            // 2) Walk commits from HEAD back to base (exclusive).
+            //    Stop as soon as we hit baseSha.
+            const authors = new Map(); // key -> { login, name, email }
+            let page = 1;
+            const perPage = 100;
+            let done = false;
+
+            while (!done) {
+              const res = await github.rest.repos.listCommits({
+                owner, repo, sha: head, per_page: perPage, page,
+              });
+              if (res.data.length === 0) break;
+
+              for (const c of res.data) {
+                if (baseSha && c.sha === baseSha) { done = true; break; }
+
+                // Prefer the resolved GitHub login; fall back to name+email
+                // for commits whose author isn't linked to a GitHub account.
+                const login = c.author?.login;
+                const name  = c.commit?.author?.name  ?? 'Unknown';
+                const email = c.commit?.author?.email ?? '';
+
+                const key = login ? `login:${login}` : `email:${email}`;
+
+                if (!authors.has(key)) {
+                  authors.set(key, { login, name, email });
+                }
+              }
+              page++;
+            }
+
+            // 3) Filter out bots and format the section.
+            const botRegex = /(\[bot\]$|-bot$|^dependabot$|^renovate$|^github-actions$)/i;
+            const humans = [...authors.values()]
+              .filter(a => !(a.login && botRegex.test(a.login)))
+              .sort((a, b) => {
+                const an = (a.login || a.name).toLowerCase();
+                const bn = (b.login || b.name).toLowerCase();
+                return an.localeCompare(bn);
+              });
+
+            if (humans.length === 0) {
+              core.info('No contributors found for this release range.');
+              return;
+            }
+
+            const lines = humans.map(a => {
+              if (a.login) return `- @${a.login}`;
+              // Unlinked contributor: show name, and email in parens if present
+              return a.email ? `- ${a.name} <${a.email}>` : `- ${a.name}`;
+            });
+
+            fs.appendFileSync(
+              'release_notes.md',
+              ['', '', '## Contributors', '', ...lines, ''].join('\n'),
+            );
+            core.info(`Added ${humans.length} contributors for this release.`);
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
