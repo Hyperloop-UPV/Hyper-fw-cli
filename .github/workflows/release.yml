@@ -38,11 +38,12 @@ jobs:
 
       # Pull all artifacts from the build run into ./artifacts/<name>/
       - name: Download build artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-          run-id: ${{ inputs.build_run_id || github.event.workflow_run.id }}
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_ID: ${{ inputs.build_run_id || github.event.workflow_run.id }}
+        run: |
+          mkdir -p artifacts
+          gh run download "$RUN_ID" -D artifacts
 
       - name: Flatten artifacts into ./release_files
         run: |
