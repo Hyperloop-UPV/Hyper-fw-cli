@@ -3,6 +3,9 @@ name: Build binaries
 on:
   workflow_dispatch:   # manual trigger only
 
+permissions:
+  contents: read
+
 jobs:
   build-linux-x64:
     name: Build Linux x64 (glibc 2.31)

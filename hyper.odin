@@ -2215,18 +2215,22 @@ main :: proc()
   setup_globals()
   defer free_all_globals()
 
-  platform.write_console_unicode(HELP_BANNER)
-  fmt.println()
-
   opts: cmdline.Hyper_Options
   if !cmdline.parse(&opts) {
     os.exit(1)
   }
   if(opts.command == .version) {
+    if(!opts.info.version.quiet) {
+      platform.write_console_unicode(HELP_BANNER)
+      fmt.println()
+    }
     fmt.printfln("%s v%s", os.args[0], HYPER_VERSION)
     return
   }
 
+  platform.write_console_unicode(HELP_BANNER)
+  fmt.println()
+  
   switch opts.command {
     case .init: {
       if !ensure_required_clt() {

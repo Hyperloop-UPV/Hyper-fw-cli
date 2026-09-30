@@ -1,0 +1,110 @@
+name: Release
+
+on:
+  workflow_run:
+    workflows: ["Build binaries"]
+    types:
+      - completed
+  workflow_dispatch:
+    inputs:
+      build_run_id:
+        description: "Optional: run ID of a Build binaries workflow to release from"
+        required: false
+        default: ""
+
+# Required so we can create the release and push the tag.
+permissions:
+  contents: write
+  actions: read   # needed to download artifacts from the triggering run
+
+jobs:
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+
+    # Only run when the triggering build succeeded. Manual dispatch bypasses this.
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+
+    steps:
+      - name: Checkout repository (release ref)
+        uses: actions/checkout@v4
+        with:
+          # When triggered by workflow_run, checkout the ref the build ran on,
+          # NOT the default branch. Falls back to the current ref for manual runs.
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          fetch-depth: 0   # full history for git log in the notes step
+
+      # Pull all artifacts from the build run into ./artifacts/<name>/
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          run-id: ${{ inputs.build_run_id || github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Flatten artifacts into ./release_files
+        run: |
+          mkdir -p release_files
+          find artifacts -type f -exec cp {} release_files/ \;
+          echo "----- release_files -----"
+          ls -la release_files
+
+      - name: Read version from hyper cli binary
+        id: version
+        run: |
+          chmod +x release_files/hyper-linux-x64
+          RAW=$(./release_files/hyper-linux-x64 version -quiet)
+          echo "Raw output: $RAW"
+
+          # Expected format: "hyper vx.y.z"
+          VERSION=$(printf '%s\n' "$RAW" \
+            | sed -nE 's/^hyper[[:space:]]+(v[0-9]+\.[0-9]+\.[0-9]+).*/\1/p' \
+            | head -n1)
+
+          if [ -z "$VERSION" ]; then
+            echo "::error::Could not parse version from 'hyper version' output: $RAW"
+            exit 1
+          fi
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Parsed version: $VERSION"
+
+      - name: Build release notes from commit messages
+        run: |
+          # Find the most recent tag that looks like vX.Y.Z (any version)
+          PREV_TAG=$(git tag --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n1 || true)
+
+          if [ -n "$PREV_TAG" ]; then
+            RANGE="${PREV_TAG}..HEAD"
+            echo "Using commit range: $RANGE"
+          else
+            RANGE="HEAD"
+            echo "No previous version tag found; listing recent commits."
+          fi
+
+          git log "$RANGE" -n 50 --pretty=format:'- %s (`%h`)' > /tmp/commits.md
+
+          {
+            echo "## Changelog"
+            echo
+            cat /tmp/commits.md
+            echo
+            echo
+            echo "_Built from commit \`${GITHUB_SHA::7}\`._"
+          } > release_notes.md
+
+          echo "----- release notes preview -----"
+          cat release_notes.md
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.version }}
+          name: ${{ steps.version.outputs.version }}
+          body_path: release_notes.md
+          files: release_files/*
+          generate_release_notes: false
+          draft: false
+          prerelease: false

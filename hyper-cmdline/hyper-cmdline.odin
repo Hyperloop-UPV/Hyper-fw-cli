@@ -46,6 +46,10 @@ Hyper_HelpCommand :: struct {
   command: string `args:"pos=0" usage:"Hyper command to get help for, can be any of ['init', 'help', 'version', 'examples', 'run', 'build', 'flash', 'uart', 'doctor', 'hardfault-analysis', 'stlib-build', 'stlib-sim-tests']"`,
 }
 
+Hyper_VersionCommand :: struct {
+  quiet: bool `usage:"Avoid printing the huge splash logo"`,
+}
+
 Hyper_ExamplesSubcommand :: enum {
   list,
   tests,
@@ -121,7 +125,7 @@ Hyper_Options :: struct {
   using info: struct #raw_union {
     // Hyper_CommandInfoInit (has no fields)
     help: Hyper_HelpCommand,
-    // Hyper_CommandInfoVersion (has no fields)
+    version: Hyper_VersionCommand,
     examples: Hyper_ExamplesCommand,
     build: Hyper_BuildCommand,
     flash: Hyper_FlashCommand,
@@ -184,7 +188,7 @@ handle_help_command :: proc(help: Hyper_HelpCommand)
 
     case "version": {
       fmt.println("Get Hyper-fw-cli version")
-      fmt.printfln("Usage:\n\t%s", usage)
+      flags.print_errors(Hyper_VersionCommand, req, usage, Hyper_FlagStyle)
     }
 
     case "examples": {
@@ -271,12 +275,12 @@ parse :: proc(opt: ^Hyper_Options) -> bool
   switch opt.command {
     // NOTE: nothing to parse on these
     case .init: {}
-    case .version: {}
     case .hardfault_analysis: {}
     case .stlib_sim_tests: {}
     case .doctor: {}
 
     case .help: ok = parse_single_command(args, Hyper_HelpCommand, &opt.info.help, pgm)
+    case .version: ok = parse_single_command(args, Hyper_VersionCommand, &opt.info.version, pgm)
     case .examples: ok = parse_single_command(args, Hyper_ExamplesCommand, &opt.info.examples, pgm)
     case .run: ok = parse_single_command(args, Hyper_RunCommand, &opt.info.run, pgm)
     case .build: ok = parse_single_command(args, Hyper_BuildCommand, &opt.info.build, pgm)
