@@ -15,7 +15,6 @@ Commmand can be any of ["init", "help", "version", "examples", "run", "build", "
 
 Use `hyper help <command>` to get usage of a specific command
 
-
 ### Building
 
 Install odinlang if you don't have it: https://odin-lang.org/docs/install/

@@ -23,7 +23,7 @@ import cmdline "hyper-cmdline"
 
 HYPER_VERSION_MAJOR :: "0"
 HYPER_VERSION_MINOR :: "2"
-HYPER_VERSION_PATCH :: "2"
+HYPER_VERSION_PATCH :: "4"
 
 HYPER_VERSION :: HYPER_VERSION_MAJOR + "." + HYPER_VERSION_MINOR + "." + HYPER_VERSION_PATCH
 
@@ -1150,11 +1150,42 @@ run_clt_installer :: proc(installer: string) -> bool
   return status.exit_code == 0
 }
 
+version_is_greater_eq :: proc(v, req: string) -> bool
+{
+  v_parts, _ := strings.split(v, ".", context.temp_allocator)
+  req_parts, _ := strings.split(req, ".", context.temp_allocator)
+
+  count_parts := i32(min(len(v_parts), len(req_parts)))
+  for i: i32 = 0; i < count_parts; i += 1 {
+    n, n_req: int
+    ok: bool
+
+    n, ok = strconv.parse_int(v_parts[i])
+    if !ok {
+      fmt.eprintfln("Could not parse int from version nº '%s' part '%s'", v, v_parts[i])
+      return false
+    }
+
+    n_req, ok = strconv.parse_int(req_parts[i])
+    if !ok {
+      fmt.eprintfln("Could not parse int from required version nº '%s' part '%s'", req, req_parts[i])
+      return false
+    }
+
+    // version is not greater than required, error message expected when calling this function
+    if n < n_req {
+      return false
+    }
+  }
+
+  return true
+}
+
 ensure_required_clt :: proc() -> bool
 {
   arm_gcc, programmer, clt_version := inspect_clt()
-  if clt_version == DEFAULT_REQUIRED_CLT_VERSION {
-    print_action("STM32CubeCLT", {{"version", DEFAULT_REQUIRED_CLT_VERSION}, {"status", "ready"}})
+  if version_is_greater_eq(clt_version, DEFAULT_REQUIRED_CLT_VERSION) {
+    print_action("STM32CubeCLT", {{"version", clt_version}, {"status", "ready"}})
     if arm_gcc.path != "" {
       print_detail("arm gcc", arm_gcc.path)
     }
@@ -1166,7 +1197,7 @@ ensure_required_clt :: proc() -> bool
   }
 
   print_action("STMCubeCLT", {
-    {"expected", DEFAULT_REQUIRED_CLT_VERSION},
+    {"expected at least", DEFAULT_REQUIRED_CLT_VERSION},
     {"detected", clt_version if clt_version != "" else "missing"},
     {"host", ODIN_OS_STRING},
   })
@@ -1210,7 +1241,7 @@ ensure_required_clt :: proc() -> bool
   if fail { return false }
 
   _, _, installed_version := inspect_clt()
-  if installed_version != DEFAULT_REQUIRED_CLT_VERSION {
+  if version_is_greater_eq(installed_version, DEFAULT_REQUIRED_CLT_VERSION) {
     fmt.eprintfln("STM32CubeCLT installation completed but detected version is %s",
                   installed_version if installed_version != "" else "missing")
     return false
