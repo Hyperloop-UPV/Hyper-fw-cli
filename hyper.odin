@@ -23,7 +23,7 @@ import cmdline "hyper-cmdline"
 
 HYPER_VERSION_MAJOR :: "0"
 HYPER_VERSION_MINOR :: "2"
-HYPER_VERSION_PATCH :: "4"
+HYPER_VERSION_PATCH :: "5"
 
 HYPER_VERSION :: HYPER_VERSION_MAJOR + "." + HYPER_VERSION_MINOR + "." + HYPER_VERSION_PATCH
 
@@ -2193,6 +2193,88 @@ command_stlib_sim_tests :: proc() -> bool
   return status.exit_code == 0
 }
 
+run_hyper_command :: proc(cmd: ^cmdline.Hyper_Options) -> bool
+{
+  ok := true
+
+  switch cmd.command {
+    case .init: {
+      if !ensure_required_clt() {
+        return false
+      }
+      if !ensure_required_toolchain() {
+        return false
+      }
+
+      uv_path := ensure_uv()
+      if uv_path == "" {
+        return false
+      }
+
+      setup_python_env_with_uv(uv_path)
+
+      ok = init_repo()
+    }
+
+    case .help: {
+      cmdline.handle_help_command(cmd.help)
+    }
+
+    case .version: {
+      fmt.printfln("%s v%s", os.args[0], HYPER_VERSION)
+    }
+
+    case .examples: {
+      ok = command_examples(&cmd.examples)
+    }
+
+    case .build: {
+      inject_at(&cmd.build.overflow, 0, cmd.build.extra_cxx_flags)
+      ok = run_build_example(
+        example = cmd.build.example,
+        test = cmd.build.test,
+        no_test = cmd.build.no_test,
+        preset = cmd.build.preset,
+        board_name = cmd.build.board_name,
+        extra_cxx_flags = cmd.build.overflow[:] if cmd.build.extra_cxx_flags != "" else nil,
+        jobs = cmd.build.jobs,
+        use_script = cmd.build.use_script,
+        use_cmake = !cmd.build.dont_use_cmake,
+      )
+    }
+
+    case .flash: {
+      ok = flash_elf(cmd.flash.elf, cmd.flash.method, !cmd.flash.no_verify, cmd.flash.skip_preflight)
+    }
+
+    case .run: {
+      ok = command_run(&cmd.run)
+    }
+
+    case .uart: {
+      ok = open_uart(cmd.uart.port, cmd.uart.baud, cmd.uart.uart_tool)
+    }
+
+    case .doctor: {
+      ok = command_doctor()
+    }
+
+    case .hardfault_analysis: {
+      ok = command_hardfault_analysis()
+    }
+
+    case .stlib_build: {
+      ok = command_stlib_build(&cmd.stlib_build)
+    }
+
+    case .stlib_sim_tests: {
+      ok = command_stlib_sim_tests()
+    }
+  }
+
+  return ok
+}
+
 main :: proc()
 {
   if ODIN_DEBUG {
@@ -2219,91 +2301,14 @@ main :: proc()
   if !cmdline.parse(&opts) {
     os.exit(1)
   }
-  if(opts.command == .version) {
-    if(!opts.info.version.quiet) {
-      platform.write_console_unicode(HELP_BANNER)
-      fmt.println()
-    }
-    fmt.printfln("%s v%s", os.args[0], HYPER_VERSION)
-    return
+
+  if !((opts.command == .version) && opts.version.quiet) {
+    platform.write_console_unicode(HELP_BANNER)
+    fmt.println()
   }
 
-  platform.write_console_unicode(HELP_BANNER)
-  fmt.println()
-  
-  switch opts.command {
-    case .init: {
-      if !ensure_required_clt() {
-        os.exit(2)
-      }
-
-      if !ensure_required_toolchain() {
-        os.exit(2)
-      }
-
-      uv_path := ensure_uv()
-      if uv_path == "" {
-        os.exit(2)
-      }
-
-      setup_python_env_with_uv(uv_path)
-
-      init_repo()
-    }
-
-    case .help: {
-      cmdline.handle_help_command(opts.help)
-    }
-
-    case .version: {
-      fmt.printfln("%s v%s", os.args[0], HYPER_VERSION)
-    }
-
-    case .examples: {
-      command_examples(&opts.examples)
-    }
-
-    case .build: {
-      inject_at(&opts.build.overflow, 0, opts.build.extra_cxx_flags)
-      run_build_example(
-        example = opts.build.example,
-        test = opts.build.test,
-        no_test = opts.build.no_test,
-        preset = opts.build.preset,
-        board_name = opts.build.board_name,
-        extra_cxx_flags = opts.build.overflow[:] if opts.build.extra_cxx_flags != "" else nil,
-        jobs = opts.build.jobs,
-        use_script = opts.build.use_script,
-        use_cmake = !opts.build.dont_use_cmake,
-      )
-    }
-
-    case .flash: {
-      flash_elf(opts.flash.elf, opts.flash.method, !opts.flash.no_verify, opts.flash.skip_preflight)
-    }
-
-    case .run: {
-      command_run(&opts.run)
-    }
-
-    case .uart: {
-      open_uart(opts.uart.port, opts.uart.baud, opts.uart.uart_tool)
-    }
-
-    case .doctor: {
-      command_doctor()
-    }
-
-    case .hardfault_analysis: {
-      command_hardfault_analysis()
-    }
-
-    case .stlib_build: {
-      command_stlib_build(&opts.stlib_build)
-    }
-
-    case .stlib_sim_tests: {
-      command_stlib_sim_tests()
-    }
+  ok := run_hyper_command(&opts)
+  if !ok {
+    os.exit(1)
   }
 }
