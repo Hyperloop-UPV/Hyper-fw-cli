@@ -83,24 +83,28 @@ jobs:
 
       - name: Compute commit range and write commit log
         id: range
+        env:
+          CURRENT_VERSION: ${{ steps.version.outputs.version }}
         run: |
-          # Find the most recent tag that looks like vX.Y.Z
-          PREV_TAG=$(git tag --sort=-v:refname \
-                     | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
-                     | head -n1 || true)
+          # Most recent version tag reachable from HEAD, excluding the tag we're about to create.
+          PREV_TAG=$(git describe --tags --abbrev=0 \
+                    --match 'v[0-9]*.[0-9]*.[0-9]*' HEAD 2>/dev/null || true)
+
+          if [ -n "$PREV_TAG" ] && [ "$PREV_TAG" = "$CURRENT_VERSION" ]; then
+            # Retry of an existing release: look one tag further back.
+            PREV_TAG=$(git describe --tags --abbrev=0 \
+                      --match 'v[0-9]*.[0-9]*.[0-9]*' "${PREV_TAG}^" 2>/dev/null || true)
+          fi
 
           if [ -n "$PREV_TAG" ]; then
             RANGE="${PREV_TAG}..HEAD"
             echo "base=$PREV_TAG" >> "$GITHUB_OUTPUT"
-            echo "Using commit range: $RANGE"
           else
             RANGE="HEAD"
             echo "base=" >> "$GITHUB_OUTPUT"
-            echo "No previous version tag found; using all history."
           fi
+          echo "Using commit range: $RANGE"
 
-          # Cap at 250 commits for the log listing (sanity limit);
-          # contributor extraction uses the API and isn't capped.
           git log "$RANGE" -n 250 --pretty=format:'- %s (`%h`)' > /tmp/commits.md
 
           {
