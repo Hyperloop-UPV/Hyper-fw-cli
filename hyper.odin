@@ -21,12 +21,6 @@ import "core:terminal/ansi"
 import platform "hyper-platform"
 import cmdline "hyper-cmdline"
 
-HYPER_VERSION_MAJOR :: "0"
-HYPER_VERSION_MINOR :: "2"
-HYPER_VERSION_PATCH :: "5"
-
-HYPER_VERSION :: HYPER_VERSION_MAJOR + "." + HYPER_VERSION_MINOR + "." + HYPER_VERSION_PATCH
-
 REPO_ROOT: string
 TOOLS_DIR: string
 STLIB_ROOT: string
