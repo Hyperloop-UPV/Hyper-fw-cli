@@ -61,23 +61,26 @@ jobs:
           echo "----- release_files -----"
           ls -la release_files
 
-      - name: Read version from hyper cli binary
+      - name: Read version from version.odin
         id: version
         run: |
-          chmod +x release_files/hyper-linux-x64
-          RAW=$(./release_files/hyper-linux-x64 version -quiet)
-          echo "Raw output: $RAW"
+          VERSION_FILE="version.odin"
 
-          # Expected format: "args[0] v0.2.4"
-          VERSION=$(printf '%s\n' "$RAW" \
-            | sed -nE 's/^.*[[:space:]](v[0-9]+\.[0-9]+\.[0-9]+)[[:space:]]*$/\1/p' \
-            | head -n1)
-
-          if [ -z "$VERSION" ]; then
-            echo "::error::Could not parse version from 'hyper version' output: $RAW"
+          if [ ! -f "$VERSION_FILE" ]; then
+            echo "::error::Could not find $VERSION_FILE"
             exit 1
           fi
 
+          MAJOR=$(sed -nE 's/^[[:space:]]*HYPER_VERSION_MAJOR[[:space:]]*::[[:space:]]*"([^"]+)".*/\1/p' "$VERSION_FILE" | head -n1)
+          MINOR=$(sed -nE 's/^[[:space:]]*HYPER_VERSION_MINOR[[:space:]]*::[[:space:]]*"([^"]+)".*/\1/p' "$VERSION_FILE" | head -n1)
+          PATCH=$(sed -nE 's/^[[:space:]]*HYPER_VERSION_PATCH[[:space:]]*::[[:space:]]*"([^"]+)".*/\1/p' "$VERSION_FILE" | head -n1)
+
+          if [ -z "$MAJOR" ] || [ -z "$MINOR" ] || [ -z "$PATCH" ]; then
+            echo "::error::Could not parse version components from $VERSION_FILE (major='$MAJOR' minor='$MINOR' patch='$PATCH')"
+            exit 1
+          fi
+
+          VERSION="v${MAJOR}.${MINOR}.${PATCH}"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "Parsed version: $VERSION"
 
